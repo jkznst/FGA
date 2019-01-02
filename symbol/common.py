@@ -881,11 +881,11 @@ def multibox_layer_FPN_RCNN(from_layers, num_classes, sizes=[.2, .95],
     num_classes += 1 # always use background as label 0
 
     # shared weights
-    loc_pred_weight = mx.symbol.Variable(name="loc_pred_conv_weight")
-    loc_pred_bias = mx.symbol.Variable(name="loc_pred_conv_bias",
+    loc_pred_weight = mx.symbol.Variable(name="rpn_loc_pred_conv_weight")
+    loc_pred_bias = mx.symbol.Variable(name="rpn_loc_pred_conv_bias",
                               init=mx.init.Constant(0.0), attr={'__lr_mult__': '2.0'})
-    cls_pred_weight = mx.symbol.Variable(name="cls_pred_conv_weight")
-    cls_pred_bias = mx.symbol.Variable(name="cls_pred_conv_bias",
+    cls_pred_weight = mx.symbol.Variable(name="rpn_cls_pred_conv_weight")
+    cls_pred_bias = mx.symbol.Variable(name="rpn_cls_pred_conv_bias",
                             init=mx.init.Constant(0.0), attr={'__lr_mult__': '2.0'})
     # bb8_pred_weight = mx.symbol.Variable(name="bb8_pred_conv_weight")
     # bb8_pred_bias = mx.symbol.Variable(name="bb8_pred_conv_bias",
@@ -926,7 +926,7 @@ def multibox_layer_FPN_RCNN(from_layers, num_classes, sizes=[.2, .95],
         #     init=mx.init.Constant(0.0), attr={'__lr_mult__': '2.0'})
         loc_pred = mx.symbol.Convolution(data=from_layer, weight=loc_pred_weight, bias=loc_pred_bias, kernel=(3,3), \
             stride=(1,1), pad=(1,1), num_filter=num_loc_pred, \
-            name="{}_loc_pred_conv".format(from_name))
+            name="rpn_loc_pred_conv_{}".format(from_name))
         # loc_pred_layers_dict.update({'bbox_pred_stride%s' % feat_stride[k]: loc_pred})
         loc_pred = mx.symbol.transpose(loc_pred, axes=(0,2,3,1))
         loc_pred = mx.symbol.Flatten(data=loc_pred)
@@ -950,7 +950,7 @@ def multibox_layer_FPN_RCNN(from_layers, num_classes, sizes=[.2, .95],
         #     init=mx.init.Constant(0.0), attr={'__lr_mult__': '2.0'})
         cls_pred = mx.symbol.Convolution(data=from_layer, weight=cls_pred_weight, bias=cls_pred_bias, kernel=(3,3), \
             stride=(1,1), pad=(1,1), num_filter=num_cls_pred, \
-            name="{}_cls_pred_conv".format(from_name))
+            name="rpn_cls_pred_conv_{}".format(from_name))
         cls_pred = mx.symbol.transpose(cls_pred, axes=(0, 2, 3, 1))
 
         # rpn_cls_score_reshape = mx.symbol.Reshape(data=cls_pred,
@@ -968,8 +968,8 @@ def multibox_layer_FPN_RCNN(from_layers, num_classes, sizes=[.2, .95],
         cls_pred = mx.symbol.Flatten(data=cls_pred)
         cls_pred_layers.append(cls_pred)
         rpn_cls_pred = mx.symbol.Reshape(data=cls_pred, shape=(0, -1, num_classes))
-        rpn_cls_pred = mx.symbol.transpose(rpn_cls_pred, axes=(0, 2, 1), name="{}_rpn_cls_pred".format(from_name))
-        rpn_cls_prob = mx.symbol.softmax(data=rpn_cls_pred, axis=1, name="{}_rpn_cls_prob".format(from_name))
+        rpn_cls_pred = mx.symbol.transpose(rpn_cls_pred, axes=(0, 2, 1), name="rpn_cls_pred_{}".format(from_name))
+        rpn_cls_prob = mx.symbol.softmax(data=rpn_cls_pred, axis=1, name="rpn_cls_prob_{}".format(from_name))
         cls_prob_layers_dict.update({'cls_prob_stride%s' % feat_stride[k]: rpn_cls_prob})
 
 
@@ -979,23 +979,23 @@ def multibox_layer_FPN_RCNN(from_layers, num_classes, sizes=[.2, .95],
         else:
             step = '(-1.0, -1.0)'
         anchors = mx.contrib.symbol.MultiBoxPrior(from_layer, sizes=size_str, ratios=ratio_str, \
-            clip=clip, name="{}_anchors".format(from_name), steps=step)
+            clip=clip, name="rpn_anchors_{}".format(from_name), steps=step)
         anchors = mx.symbol.Flatten(data=anchors)
-        rpn_anchors = mx.symbol.reshape(data=anchors, shape=(0, -1, 4), name="{}_rpn_anchor_reshape".format(from_name))
+        rpn_anchors = mx.symbol.reshape(data=anchors, shape=(0, -1, 4), name="rpn_anchor_reshape_{}".format(from_name))
         anchor_layers_dict.update({'rpn_anchor_stride%s' % feat_stride[k]: rpn_anchors})
         anchor_layers.append(anchors)
 
     loc_preds = mx.symbol.Concat(*loc_pred_layers, num_args=len(loc_pred_layers), \
-        dim=1, name="multibox_loc_pred")
+        dim=1, name="rpn_multibox_loc_pred")
     # bb8_preds = mx.symbol.Concat(*bb8_pred_layers, num_args=len(bb8_pred_layers), \
     #                              dim=1, name="multibox_bb8_pred")
     cls_preds = mx.symbol.Concat(*cls_pred_layers, num_args=len(cls_pred_layers), \
         dim=1)
     cls_preds = mx.symbol.Reshape(data=cls_preds, shape=(0, -1, num_classes))
-    cls_preds = mx.symbol.transpose(cls_preds, axes=(0, 2, 1), name="multibox_cls_pred")
+    cls_preds = mx.symbol.transpose(cls_preds, axes=(0, 2, 1), name="rpn_multibox_cls_pred")
     anchor_boxes = mx.symbol.Concat(*anchor_layers, \
         num_args=len(anchor_layers), dim=1)
-    anchor_boxes = mx.symbol.Reshape(data=anchor_boxes, shape=(0, -1, 4), name="multibox_anchors")
+    anchor_boxes = mx.symbol.Reshape(data=anchor_boxes, shape=(0, -1, 4), name="rpn_multibox_anchors")
     return [loc_pred_layers_dict, cls_prob_layers_dict, anchor_layers_dict,
             loc_preds, cls_preds, anchor_boxes]
 
