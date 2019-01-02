@@ -231,22 +231,22 @@ def get_ssd_conv_down(conv_feat):
     conv_C7, conv_C6, conv_C5, conv_C4, conv_C3 = conv_feat
 
     # C5 to P5, 1x1 dimension reduction to 256
-    P5 = conv_act_layer(from_layer=conv_C5, kernel=(1, 1), num_filter=256, name="P5_lateral", use_act=False)
-    P5_up = mx.symbol.UpSampling(P5, scale=2, sample_type='nearest', workspace=512, name='P5_upsampling', num_args=1)
-    P5 = conv_act_layer(from_layer=P5, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P5", use_act=False)
+    P5 = conv_act_layer(from_layer=conv_C5, kernel=(1, 1), num_filter=256, name="fpn_P5_lateral", use_act=False)
+    P5_up = mx.symbol.UpSampling(P5, scale=2, sample_type='nearest', workspace=512, name='fpn_P5_upsampling', num_args=1)
+    P5 = conv_act_layer(from_layer=P5, kernel=(3, 3), pad=(1, 1), num_filter=256, name="fpn_P5", use_act=False)
 
     # P5 2x upsampling + C4 = P4
-    P4_la = conv_act_layer(from_layer=conv_C4, kernel=(1, 1), num_filter=256, name="P4_lateral", use_act=False)
-    P5_clip = mx.symbol.Crop(*[P5_up, P4_la], name="P4_clip")
-    P4 = mx.sym.ElementWiseSum(*[P5_clip, P4_la], name="P4_sum")
-    P4_up = mx.symbol.UpSampling(P4, scale=2, sample_type='nearest', workspace=512, name='P4_upsampling', num_args=1)
-    P4 = conv_act_layer(from_layer=P4, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P4", use_act=False)
+    P4_la = conv_act_layer(from_layer=conv_C4, kernel=(1, 1), num_filter=256, name="fpn_P4_lateral", use_act=False)
+    P5_clip = mx.symbol.Crop(*[P5_up, P4_la], name="fpn_P4_clip")
+    P4 = mx.sym.ElementWiseSum(*[P5_clip, P4_la], name="fpn_P4_sum")
+    P4_up = mx.symbol.UpSampling(P4, scale=2, sample_type='nearest', workspace=512, name='fpn_P4_upsampling', num_args=1)
+    P4 = conv_act_layer(from_layer=P4, kernel=(3, 3), pad=(1, 1), num_filter=256, name="fpn_P4", use_act=False)
 
     # P4 2x upsampling + C3 = P3
-    P3_la = conv_act_layer(from_layer=conv_C3, kernel=(1, 1), num_filter=256, name="P3_lateral", use_act=False)
-    P4_clip = mx.symbol.Crop(*[P4_up, P3_la], name="P3_clip")
-    P3 = mx.sym.ElementWiseSum(*[P4_clip, P3_la], name="P3_sum")
-    P3 = conv_act_layer(from_layer=P3, kernel=(3, 3), pad=(1, 1), num_filter=256, name="P3", use_act=False)
+    P3_la = conv_act_layer(from_layer=conv_C3, kernel=(1, 1), num_filter=256, name="fpn_P3_lateral", use_act=False)
+    P4_clip = mx.symbol.Crop(*[P4_up, P3_la], name="fpn_P3_clip")
+    P3 = mx.sym.ElementWiseSum(*[P4_clip, P3_la], name="fpn_P3_sum")
+    P3 = conv_act_layer(from_layer=P3, kernel=(3, 3), pad=(1, 1), num_filter=256, name="fpn_P3", use_act=False)
 
     conv_fpn_feat = dict()
     conv_fpn_feat.update({"stride64": conv_C7, "stride32": conv_C6, "stride16": P5, "stride8": P4, "stride4": P3})
