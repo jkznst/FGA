@@ -11,7 +11,7 @@ import cv2
 from tqdm import tqdm
 from dataset.iterator import DetRecordIter
 from config.config import cfg
-from evaluate.eval_metric import MApMetric, VOC07MApMetric, PoseMetric
+from evaluate.eval_metric import MApMetric, VOC07MApMetric, PoseMetric, PoseMetric_offset, PoseMetric_MaskRCNN_keypoint
 import logging
 from symbol.symbol_factory import get_symbol
 from MultiBoxDetection import BB8MultiBoxDetection
@@ -171,7 +171,7 @@ def evaluate_net(net, path_imgrec, num_classes, mean_pixels, data_shape,
         metric = MApMetric(ovp_thresh, use_difficult, class_names,
                             roc_output_path=os.path.join(os.path.dirname(model_prefix), 'roc'))
 
-    posemetric = PoseMetric(LINEMOD_path='/media/DataDisk2_4T/zhangxin/DATASETS/SIXD_CHALLENGE/LINEMOD/', classes=class_names)
+    posemetric = PoseMetric_MaskRCNN_keypoint(LINEMOD_path='/media/DataDisk2_4T/zhangxin/DATASETS/SIXD_CHALLENGE/LINEMOD/', classes=class_names)
 
     # visualize bb8 results
     # for nbatch, eval_batch in tqdm(enumerate(eval_iter)):

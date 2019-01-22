@@ -6,7 +6,8 @@ import os
 import importlib
 import re
 from dataset.iterator import DetRecordIter
-from train.metric import MultiBoxMetric
+#from train.metric import MultiBoxMetric_bb8offset, MultiBoxMetric_MaskRCNN_keypoint
+import train.metric as train_metric
 from evaluate.eval_metric import MApMetric, VOC07MApMetric
 from config.config import cfg
 from symbol.symbol_factory import get_symbol_train
@@ -114,7 +115,7 @@ def get_fixed_params(symbol, fixed_param_prefix=''):
     return fixed_param_names
 
 
-def train_net(network, train_path, num_classes, batch_size,
+def train_net(network, mode, train_path, num_classes, batch_size,
               data_shape, mean_pixels, resume, finetune, pretrained, epoch,
               prefix, ctx, begin_epoch, end_epoch, frequent, learning_rate,
               momentum, weight_decay, lr_refactor_step, lr_refactor_ratio, alpha_bb8=1.0,
@@ -125,7 +126,7 @@ def train_net(network, train_path, num_classes, batch_size,
               voc07_metric=False, nms_topk=400, force_suppress=False,
               train_list="", val_path="", val_list="", iter_monitor=0,
               monitor_pattern=".*", log_file=None, optimizer='sgd', tensorboard=False,
-              checkpoint_period=5, min_neg_samples=0):
+              checkpoint_period=2, min_neg_samples=0):
     """
     Wrapper for training phase.
 
@@ -241,7 +242,7 @@ def train_net(network, train_path, num_classes, batch_size,
         val_iter = None
 
     # load symbol
-    net = get_symbol_train(network, data_shape[1], alpha_bb8, num_classes=num_classes,
+    net = get_symbol_train(network, mode, data_shape[1], alpha_bb8, num_classes=num_classes,
                            nms_thresh=nms_thresh, force_suppress=force_suppress, nms_topk=nms_topk, minimum_negative_samples=min_neg_samples)
 
     # define layers with fixed weight/bias
@@ -353,16 +354,17 @@ def train_net(network, train_path, num_classes, batch_size,
 
     # run fit net, every n epochs we run evaluation network to get mAP
     if voc07_metric:
-        valid_metric = VOC07MApMetric(ovp_thresh, use_difficult, class_names, pred_idx=3,
+        valid_metric = VOC07MApMetric(ovp_thresh, use_difficult, class_names, pred_idx=4,
                                       roc_output_path=os.path.join(os.path.dirname(prefix), 'roc'))
     else:
-        valid_metric = MApMetric(ovp_thresh, use_difficult, class_names, pred_idx=3,
+        valid_metric = MApMetric(ovp_thresh, use_difficult, class_names, pred_idx=4,
                                  roc_output_path=os.path.join(os.path.dirname(prefix), 'roc'))
 
+    eval_metric = getattr(train_metric, 'MultiBoxMetric_{}'.format(mode))
     mod.fit(train_iter,
             val_iter,
-            eval_metric=MultiBoxMetric(),
-            validation_metric=[valid_metric, MultiBoxMetric()],    # use 'valid_metric' for calculate mAP
+            eval_metric=eval_metric(),
+            validation_metric=[valid_metric, eval_metric()],    # use 'valid_metric' for calculate mAP
             batch_end_callback=batch_end_callback,
             eval_end_callback=eval_end_callback,
             epoch_end_callback=epoch_end_callback,

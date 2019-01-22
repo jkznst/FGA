@@ -268,7 +268,7 @@ def get_config(network, data_shape, **kwargs):
         msg = 'No configuration found for %s with data_shape %d' % (network, data_shape)
         raise NotImplementedError(msg)
 
-def get_symbol_train(network, data_shape, alpha_bb8,  **kwargs):
+def get_symbol_train(network, mode, data_shape, alpha_bb8, **kwargs):
     """Wrapper for get symbol for train
 
     Parameters
@@ -290,13 +290,13 @@ def get_symbol_train(network, data_shape, alpha_bb8,  **kwargs):
         'resnet50': symbol_builder.get_resnet_fpn_train,
         'resnet50d': symbol_builder.get_resnetd_fpn_train,
         'resnet50deeplabv2': symbol_builder.get_resnetdeeplabv2_fpn_train,
-        'resnet50m':symbol_builder.get_RCNN_resnetm_fpn_train,
+        'resnet50m':getattr(symbol_builder, 'get_{}_resnetm_fpn_train'.format(mode)),
         'resnet50md': symbol_builder.get_resnetmd_fpn_train,
         'resnet101': symbol_builder.get_resnet_fpn_train
     }
     if network not in networks:
         raise ValueError("network {} not supported".format(network))
-    return networks[network](alpha_bb8=alpha_bb8, **config)
+    return networks[network](alpha_bb8=alpha_bb8, im_info=(data_shape, data_shape, 1), **config)
 
     # return symbol_builder.get_symbol_train(alpha_bb8=alpha_bb8, **config)
 
@@ -322,11 +322,11 @@ def get_symbol(network, data_shape, **kwargs):
         # 'resnet50': symbol_builder.get_resnet_fpn_test,
         # 'resnet50d': symbol_builder.get_resnetd_fpn_test,
         # 'resnet50deeplabv2': symbol_builder.get_resnetdeeplabv2_fpn_test,
-        'resnet50m': symbol_builder.get_RCNN_resnetm_fpn_test,
+        'resnet50m': symbol_builder.get_MaskRCNN_keypoint_resnetm_fpn_test,
         # 'resnet50md': symbol_builder.get_resnetmd_fpn_test,
         # 'resnet101': symbol_builder.get_resnet_fpn_test
     }
     if network not in networks:
         raise ValueError("network {} not supported".format(network))
-    return networks[network](**config)
+    return networks[network](im_info=(data_shape, data_shape, 1), **config)
     # return symbol_builder.get_symbol(**config)

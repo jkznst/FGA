@@ -8,7 +8,7 @@ import numpy.random as npr
 from distutils.util import strtobool
 
 
-DEBUG = False
+DEBUG = True
 
 def clip_boxes(boxes, im_shape):
     """
