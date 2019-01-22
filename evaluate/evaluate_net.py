@@ -86,7 +86,7 @@ def show_BB8(image, pred_BB8_image_coordinates_list, cids, plot_path):
     plt.close(fig)
 
 
-def evaluate_net(net, path_imgrec, num_classes, mean_pixels, data_shape,
+def evaluate_net(net, mode, path_imgrec, num_classes, mean_pixels, data_shape,
                  model_prefix, epoch, ctx=mx.cpu(), batch_size=1,
                  path_imglist="", nms_thresh=0.45, force_nms=False,
                  ovp_thresh=0.5, use_difficult=False, class_names=None,
@@ -151,7 +151,7 @@ def evaluate_net(net, path_imgrec, num_classes, mean_pixels, data_shape,
     if net is None:
         net = load_net
     else:
-        net = get_symbol(net, data_shape[1], num_classes=num_classes,
+        net = get_symbol(net, mode, data_shape[1], num_classes=num_classes,
             nms_thresh=nms_thresh, force_suppress=force_nms)
     if not 'label' in net.list_arguments():
         label = mx.sym.Variable(name='label')

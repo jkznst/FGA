@@ -300,7 +300,7 @@ def get_symbol_train(network, mode, data_shape, alpha_bb8, **kwargs):
 
     # return symbol_builder.get_symbol_train(alpha_bb8=alpha_bb8, **config)
 
-def get_symbol(network, data_shape, **kwargs):
+def get_symbol(network, mode, data_shape, **kwargs):
     """Wrapper for get symbol for test
 
     Parameters
@@ -322,7 +322,7 @@ def get_symbol(network, data_shape, **kwargs):
         # 'resnet50': symbol_builder.get_resnet_fpn_test,
         # 'resnet50d': symbol_builder.get_resnetd_fpn_test,
         # 'resnet50deeplabv2': symbol_builder.get_resnetdeeplabv2_fpn_test,
-        'resnet50m': symbol_builder.get_MaskRCNN_keypoint_resnetm_fpn_test,
+        'resnet50m': getattr(symbol_builder, 'get_{}_resnetm_fpn_test'.format(mode)),
         # 'resnet50md': symbol_builder.get_resnetmd_fpn_test,
         # 'resnet101': symbol_builder.get_resnet_fpn_test
     }

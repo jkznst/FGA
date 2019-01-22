@@ -14,6 +14,8 @@ def parse_args():
                         default="", type=str)
     parser.add_argument('--network', dest='network', type=str, default='resnet50m',
                         help='which network to use')
+    parser.add_argument('--mode', dest='mode', type=str, default='RCNN_offset',
+                        help='which mode to use')
     parser.add_argument('--batch-size', dest='batch_size', type=int, default=4,
                         help='evaluation batch size')
     parser.add_argument('--num-class', dest='num_class', type=int, default=8,
@@ -86,7 +88,7 @@ if __name__ == '__main__':
         prefix = args.prefix + args.network + '_' + str(args.data_shape)
     else:
         prefix = args.prefix
-    evaluate_net(network, args.rec_path, num_class,
+    evaluate_net(network, args.mode, args.rec_path, num_class,
                  (args.mean_r, args.mean_g, args.mean_b), args.data_shape,
                  prefix, args.epoch, ctx, batch_size=args.batch_size,
                  path_imglist=args.list_path, nms_thresh=args.nms_thresh,

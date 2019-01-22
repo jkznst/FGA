@@ -1108,7 +1108,7 @@ def get_RCNN_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_fi
     return out
 
 def get_RCNN_offset_resnetm_fpn_test(num_classes, num_layers, num_filters,
-                     sizes, ratios, normalizations=-1, steps=[], **kwargs):
+                     sizes, ratios, normalizations=-1, steps=[], im_info=(), **kwargs):
     """Build network symbol for training FPN
 
     Parameters
@@ -1185,8 +1185,8 @@ def get_RCNN_offset_resnetm_fpn_test(num_classes, num_layers, num_filters,
     cls_prob = mx.symbol.softmax(data=cls_preds, axis=1, name="rpn_cls_prob")
 
     # rpn proposal
-    im_info = (512, 512, 1)    # (H, W, scale)
-    rpn_feat_stride = [4, 8, 16, 32, 64]
+    # im_info = (512, 512, 1)    # (H, W, scale)
+    # rpn_feat_stride = [4, 8, 16, 32, 64]
 
     # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
     rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
@@ -1536,7 +1536,7 @@ def get_MaskRCNN_keypoint_resnetm_fpn_test(num_classes, num_layers, num_filters,
     out = mx.symbol.Group([rois, score, cid, maskrcnn_keypoint_cls_score])
     return out
 
-def get_RCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filters,
+def get_FGARCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filters,
                      sizes, ratios, normalizations=-1, steps=[], **kwargs):
     """Build network symbol for training FPN
 
