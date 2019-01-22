@@ -18,7 +18,9 @@ def parse_args():
                         default="", type=str)
     parser.add_argument('--network', dest='network', type=str, default='resnet50m',
                         help='which network to use')
-    parser.add_argument('--batch-size', dest='batch_size', type=int, default=8,
+    parser.add_argument('--mode', dest='mode', type=str, default='RCNN_offset',
+                        help='which mode to use')
+    parser.add_argument('--batch-size', dest='batch_size', type=int, default=4,
                         help='training batch size')
     parser.add_argument('--resume', dest='resume', type=int, default=-1,
                         help='resume training from epoch n')
@@ -32,9 +34,9 @@ def parse_args():
     parser.add_argument('--epoch', dest='epoch', help='epoch of pretrained model',
                         default=0, type=int)
     parser.add_argument('--prefix', dest='prefix', help='new model prefix',
-                        default=os.path.join(os.getcwd(), 'output', 'RCNN-6DPOSE', 'rcnn-fpn-resnet50m-512-P4-heatmapL2loss-roialign-granularity1', 'fpn'), type=str)
+                        default=os.path.join(os.getcwd(), 'output', 'OCCLUSION', 'rcnn_bb8offset', 'rcnn'), type=str)
     parser.add_argument('--gpus', dest='gpus', help='GPU devices to train with',
-                        default='0,1,2,3', type=str)
+                        default='2,3', type=str)
     parser.add_argument('--begin-epoch', dest='begin_epoch', help='begin epoch of training',
                         default=0, type=int)
     parser.add_argument('--end-epoch', dest='end_epoch', help='end epoch of training',
@@ -76,7 +78,7 @@ def parse_args():
     parser.add_argument('--num-example', dest='num_example', type=int, default=5717,
                         help='number of image examples')
     parser.add_argument('--class-names', dest='class_names', type=str,
-                        default='obj_01, obj_02, obj_05, obj_06, obj_08, obj_09, obj_11, obj_12',
+                        default='obj_01, obj_05, obj_06, obj_08, obj_09, obj_10, obj_11, obj_12',
                         # 'aeroplane, bicycle, bird, boat, bottle, bus, \
                         # car, cat, chair, cow, diningtable, dog, horse, motorbike, \
                         # person, pottedplant, sheep, sofa, train, tvmonitor',
@@ -170,7 +172,7 @@ if __name__ == '__main__':
             args.prefix = 'out/resnet101'
         args.freeze_pattern = []
     # start training
-    train_net(args.network, args.train_path,
+    train_net(args.network, args.mode, args.train_path,
               args.num_class, args.batch_size,
               args.data_shape, [args.mean_r, args.mean_g, args.mean_b],
               args.resume, args.finetune, args.pretrained,
