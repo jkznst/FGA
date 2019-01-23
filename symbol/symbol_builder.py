@@ -2,7 +2,7 @@ import mxnet as mx
 from symbol.common import multi_layer_feature_SSD, multibox_layer_FPN, multibox_layer_SSD, multibox_layer_FPN_RCNN, multibox_layer_SSD_RCNN
 from operator_py.training_target import *
 from operator_py.rpn_proposal import *
-from operator_py.proposal_target_softmax import *
+from operator_py.proposal_FGAtarget_cls_softmax_reg_offset import *
 from operator_py.fpn_roi_pooling import *
 from operator_py.proposal_target_bb8offset_reg import *
 from operator_py.proposal_target_maskrcnn_keypoint import *
@@ -1536,8 +1536,8 @@ def get_MaskRCNN_keypoint_resnetm_fpn_test(num_classes, num_layers, num_filters,
     out = mx.symbol.Group([rois, score, cid, maskrcnn_keypoint_cls_score])
     return out
 
-def get_FGARCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filters,
-                     sizes, ratios, normalizations=-1, steps=[], **kwargs):
+def get_FGARCNN_cls_softmax_reg_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filters,
+                     sizes, ratios, normalizations=-1, steps=[], im_info=(), **kwargs):
     """Build network symbol for training FPN
 
     Parameters
@@ -1590,7 +1590,6 @@ def get_FGARCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filter
 
     """
     from symbol.resnetm import get_ssd_conv, get_ssd_conv_down
-    from rcnn.config import config
     data = mx.symbol.Variable('data')
     label = mx.sym.Variable('label')
 
@@ -1629,9 +1628,9 @@ def get_FGARCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filter
         normalization='valid', name="loc_loss")
 
     # rpn proposal
-    im_info = (512, 512, 1)    # (H, W, scale)
+    # im_info = (512, 512, 1)    # (H, W, scale)
     rpn_feat_stride = [4, 8, 16, 32, 64]
-    granularity = (56, 56)
+    granularity = (3, 3)
 
     # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
     rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
@@ -1651,14 +1650,14 @@ def get_FGARCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filter
     #     rpn_proposal_dict.update({'rpn_proposal_stride%s' % s: rpn_det})
 
     # rcnn roi proposal target
-    group = mx.symbol.Custom(rois=rois, gt_boxes=label, op_type='bb8_proposal_target_softmax',
+    group = mx.symbol.Custom(rois=rois, gt_boxes=label, op_type='bb8_proposal_FGAtarget_cls_softmax_reg_offset',
                          num_keypoints=8, batch_images=2,
                          batch_rois=256, fg_fraction=1.0,
                          fg_overlap=0.8, bb8_variance=(0.1, 0.1),
                          im_info=im_info, granularity=granularity)
     rois = group[0]
-    FGA_cls_target = group[1]
-    FGA_reg_target = group[2]
+    FGA_cls_target = group[1]    # (N, 8)
+    FGA_reg_target = group[2]    # (N, 16)
     FGA_reg_weight = group[3]
 
     # # rcnn roi pool
@@ -1674,40 +1673,41 @@ def get_FGARCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filter
     #                             rois=rois)
     # roi_pool = mx.symbol.MakeLoss(data=roi_pool, grad_scale=0., name='roi_pool')
 
-    # # Mask RCNN head
-    for i in range(8):
-        weight = mx.symbol.Variable(name="rcnn_FGA_cls_conv{}_weight".format(i+1),
-                              init=mx.init.MSRAPrelu(factor_type="out", slope=0.0))
-        bias = mx.symbol.Variable(name="rcnn_FGA_cls_conv{}_bias".format(i+1),
-                              init=mx.init.Constant(0.0))
-        x = mx.symbol.Convolution(data=roi_pool, weight=weight, bias=bias,
-                                      kernel=(3, 3), stride=(1,1), pad=(1,1), num_filter=512, name="rcnn_FGA_cls_conv{}".format(i + 1))
-        x = mx.symbol.Activation(data=x, act_type="relu", name="rcnn_FGA_cls_relu{}".format(i + 1))
+    # # bb8 FGA cls + regression head
+    flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8FGA_flatten")
+    fc6_weight = mx.symbol.Variable(name="rcnn_bb8FGA_fc6_weight", init=mx.init.Xavier())
+    fc6_bias = mx.symbol.Variable(name="rcnn_bb8FGA_fc6_bias", init=mx.init.Constant(0.0))
+    fc6 = mx.symbol.FullyConnected(data=flatten, weight=fc6_weight, bias=fc6_bias, num_hidden=1024,
+                                   name="rcnn_bb8FGA_fc6")
+    relu6 = mx.symbol.Activation(data=fc6, act_type="relu", name="rcnn_bb8FGA_relu6")
+    fc7_weight = mx.symbol.Variable(name="rcnn_bb8FGA_fc7_weight", init=mx.init.Xavier())
+    fc7_bias = mx.symbol.Variable(name="rcnn_bb8FGA_fc7_bias", init=mx.init.Constant(0.0))
+    fc7 = mx.symbol.FullyConnected(data=relu6, weight=fc7_weight, bias=fc7_bias, num_hidden=1024,
+                                   name="rcnn_bb8FGA_fc7")
+    relu7 = mx.symbol.Activation(data=fc7, act_type="relu", name="rcnn_bb8FGA_relu7")
 
-    deconv_weight = mx.symbol.Variable(name="rcnn_FGA_cls_deconv_weight", init=mx.init.MSRAPrelu(factor_type="out", slope=0.0))
-    deconv_bias = mx.symbol.Variable(name="rcnn_FGA_cls_deconv_bias", init=mx.init.Constant(0.0))
-    x = mx.symbol.Deconvolution(data=x, weight=deconv_weight, bias=deconv_bias,
-                                kernel=(4,4), stride=(2,2), pad=(1,1), target_shape=(28, 28), num_filter=8, no_bias=False, name="rcnn_FGA_cls_deconv")
+    # FGA cls
+    cls_pred_weight = mx.symbol.Variable(name="rcnn_bb8FGA_cls_pred_weight", init=mx.init.Normal(sigma=0.01))
+    cls_pred_bias = mx.symbol.Variable(name="rcnn_bb8FGA_cls_pred_bias", init=mx.init.Constant(0.0))
+    rcnn_bb8FGA_cls_score = mx.symbol.FullyConnected(data=relu7, weight=cls_pred_weight, bias=cls_pred_bias,
+                                                     num_hidden=8 * granularity[0] * granularity[1], name="rcnn_bb8FGA_cls_score")
+    # FGA offset reg
+    reg_pred_weight = mx.symbol.Variable(name="rcnn_bb8FGA_reg_pred_weight", init=mx.init.Normal(sigma=0.001))
+    reg_pred_bias = mx.symbol.Variable(name="rcnn_bb8FGA_reg_pred_bias", init=mx.init.Constant(0.0))
+    rcnn_bb8FGA_reg_pred = mx.symbol.FullyConnected(data=relu7, weight=reg_pred_weight, bias=reg_pred_bias,
+                                                       num_hidden=16, name="rcnn_bb8FGA_reg_pred")
 
-    rcnn_FGA_cls_score = mx.symbol.contrib.BilinearResize2D(data=x, height=56, width=56, name="rcnn_FGA_cls_score")
-
-    # # classification with fc layers
-    # # flatten = mx.symbol.Flatten(data=roi_pool, name="rcnn_FGA_reg_flatten")
-    # # fc6 = mx.symbol.FullyConnected(data=flatten, num_hidden=1024, name="rcnn_FGA_reg_fc6")
-    # # relu6 = mx.symbol.Activation(data=fc6, act_type="relu", name="rcnn_FGA_reg_relu6")
-    # # drop6 = mx.symbol.Dropout(data=relu6, p=0.5, name="rcnn_FGA_reg_drop6")
-    # # fc7 = mx.symbol.FullyConnected(data=drop6, num_hidden=1024, name="rcnn_FGA_reg_fc7")
-    # # relu7 = mx.symbol.Activation(data=fc7, act_type="relu", name="rcnn_FGA_reg_relu7")
-    # #
-    # # # classification
-    # # rcnn_FGA_cls_score = mx.symbol.FullyConnected(data=relu7, num_hidden=8 * granularity[0] * granularity[1])
-    # # # bounding box regression
-    # # rcnn_FGA_bb8_pred = mx.symbol.FullyConnected(data=relu7, num_hidden=16, name='rcnn_FGA_reg_pred')
-    #
-    # # maskrcnn keypoint loss
-    rcnn_FGA_cls_prob = mx.symbol.SoftmaxOutput(data=rcnn_FGA_cls_score.reshape((0,8,-1)), label=FGA_cls_target, \
-        ignore_label=-1, use_ignore=True, grad_scale=alpha_bb8, preserve_shape=True, \
-        normalization='valid', name="rcnn_FGA_cls_prob")
+    # # FGA cls loss
+    rcnn_bb8FGA_cls_prob = mx.symbol.SoftmaxOutput(data=rcnn_bb8FGA_cls_score.reshape((0,8,-1)), label=FGA_cls_target, \
+        ignore_label=-1, use_ignore=True, grad_scale=alpha_bb8 / 2.0, preserve_shape=True, \
+        normalization='valid', name="rcnn_bb8FGA_cls_prob")
+    # FGA offset reg loss
+    rcnn_bb8FGA_reg_loss_ = mx.symbol.smooth_l1(name="rcnn_bb8FGA_reg_loss_",
+                                                   data=FGA_reg_weight * (
+                                                               rcnn_bb8FGA_reg_pred - FGA_reg_target),
+                                                   scalar=1.0)
+    rcnn_bb8FGA_reg_loss = mx.symbol.MakeLoss(rcnn_bb8FGA_reg_loss_, grad_scale=alpha_bb8 / 2.0, \
+                                                 normalization='valid', name="rcnn_bb8FGA_reg_loss")
 
     # heatmap L2 loss
     # rcnn_FGA_cls_loss_ = mx.symbol.square(data=(rcnn_FGA_cls_score - FGA_cls_target), name='rcnn_FGA_cls_loss_') / 2.
@@ -1749,7 +1749,7 @@ def get_FGARCNN_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_filter
     # out = mx.symbol.Group([cls_prob, loc_loss, cls_label, det])
     out = mx.symbol.Group([cls_prob, loc_loss, cls_label, rpn_loc_target, det,
                            rois, score, cid,
-                           rcnn_FGA_cls_target, rcnn_FGA_reg_target, rcnn_FGA_cls_prob
+                           rcnn_FGA_cls_target, rcnn_FGA_reg_target, rcnn_bb8FGA_cls_prob, rcnn_bb8FGA_reg_loss
                            ])
     return out
 

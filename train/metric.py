@@ -189,14 +189,14 @@ class MultiBoxMetric_MaskRCNN_keypoint(mx.metric.EvalMetric):
                 for x, y in zip(self.sum_metric, self.num_inst)]
             return (names, values)
 
-class MultiBoxMetric_softmax(mx.metric.EvalMetric):
+class MultiBoxMetric_FGARCNN_cls_softmax_reg_offset(mx.metric.EvalMetric):
     """Calculate metrics for Multibox training """
     def __init__(self, eps=1e-8):
-        super(MultiBoxMetric_softmax, self).__init__('MultiBox_softmax')
+        super(MultiBoxMetric_FGARCNN_cls_softmax_reg_offset, self).__init__('MultiBox_softmax')
         self.eps = eps
-        self.num = 6
+        self.num = 5
         self.name = ['rpn_CrossEntropy', 'rpn_SmoothL1', 'rcnn_FGA_cls_CrossEntropy', 'rcnn_FGA_cls_accuracy',
-                     'rcnn_FGA_bb8_pred_SmoothL1', 'rcnn_FGA_reg_mae_pixel' ]
+                     'rcnn_FGA_bb8_pred_SmoothL1']
         self.reset()
 
     def reset(self):
@@ -256,6 +256,7 @@ class MultiBoxMetric_softmax(mx.metric.EvalMetric):
         rcnn_FGA_cls_target = preds[8].asnumpy()    # shape (N_rois, num_keypoints)
         rcnn_FGA_reg_target = preds[9].asnumpy()    # shape (N_rois, 2*num_keypoints)
         rcnn_FGA_cls_prob = preds[10].asnumpy()     # shape (N_rois, num_keypoints, granularity[0]*granularity[1])
+        rcnn_FGA_reg_loss = preds[11].asnumpy()
 
         # rcnn_FGA_reg_target_abs_mean = np.mean(np.abs(rcnn_FGA_reg_target))
         # rcnn_FGA_reg_target_mean = np.mean(rcnn_FGA_reg_target)
@@ -277,6 +278,9 @@ class MultiBoxMetric_softmax(mx.metric.EvalMetric):
         accuracy = np.sum(max_pred_prob_indices == rcnn_indices)
         self.sum_metric[3] += np.sum(accuracy)
         self.num_inst[3] += rcnn_valid_count
+        # smoothl1loss
+        self.sum_metric[4] += np.sum(rcnn_FGA_reg_loss)
+        self.num_inst[4] += rcnn_valid_count * 16
 
         # heatmap version loss update
         # logistic_loss = - rcnn_FGA_cls_target * np.log(rcnn_FGA_cls_prob) - (1 - rcnn_FGA_cls_target) * np.log(1 - rcnn_FGA_cls_prob)
