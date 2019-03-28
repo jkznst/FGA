@@ -58,13 +58,13 @@ def bbox_transform(ex_rois, gt_rois, box_stds):
     return targets
 
 
-def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, granularity, im_info):
+def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, im_info):
     """
     compute bounding box regression targets from ex_rois to gt_rois
     :param ex_rois: [N, 4]
     :param gt_bb8_coordinates: [N, 16]
     :param im_info: (H, W, scale)
-    :return: [N, 16, granularity[0], granularity[1]]
+    :return: [N, 16]
     """
     assert ex_rois.shape[0] == gt_bb8_coordinates.shape[0], 'inconsistent rois number'
 
@@ -73,53 +73,45 @@ def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, granularity, im_inf
     ex_ctr_x = ex_rois[:, 0] + 0.5 * (ex_widths - 1.0)
     ex_ctr_y = ex_rois[:, 1] + 0.5 * (ex_heights - 1.0)
 
-    # fine grained anchor centers
-    ex_FGA_ctr_x = np.zeros(shape=(ex_rois.shape[0], 1, granularity[1]))
-    ex_FGA_ctr_y = np.zeros(shape=(ex_rois.shape[0], granularity[0], 1))
-    for i in range(granularity[1]):
-        ex_FGA_ctr_x[:, 0, i] = ex_ctr_x + (i - int((granularity[1] - 1) / 2)) * ex_widths / granularity[1]
-    ex_FGA_ctr_x = np.repeat(ex_FGA_ctr_x, repeats=granularity[0], axis=1)
-    for i in range(granularity[0]):
-        ex_FGA_ctr_y[:, i, 0] = ex_ctr_y + (i - int((granularity[0] - 1) / 2)) * ex_heights / granularity[0]
-    ex_FGA_ctr_y = np.repeat(ex_FGA_ctr_y, repeats=granularity[1], axis=2)
-
-
-    # gt_widths = gt_rois[:, 2] - gt_rois[:, 0] + 1.0
-    # gt_heights = gt_rois[:, 3] - gt_rois[:, 1] + 1.0
     gt_bb8_coordinates = gt_bb8_coordinates.reshape((gt_bb8_coordinates.shape[0], 8, 2))
     gt_bb8_coordinates_x = gt_bb8_coordinates[:, :, 0] * im_info[1]
     gt_bb8_coordinates_y = gt_bb8_coordinates[:, :, 1] * im_info[0]
 
-    distance_x = gt_bb8_coordinates_x[:, :, np.newaxis, np.newaxis] - ex_FGA_ctr_x[:, np.newaxis]
-    distance_y = gt_bb8_coordinates_y[:, :, np.newaxis, np.newaxis] - ex_FGA_ctr_y[:, np.newaxis]
-    distance = np.sqrt(np.square(distance_x) + np.square(distance_y))
-
-    FGA_cls_targets = np.zeros_like(distance)
-    FGA_cls_targets = FGA_cls_targets.reshape((FGA_cls_targets.shape[0], FGA_cls_targets.shape[1], -1))
-    # min_distances = np.min(distance.reshape((distance.shape[0], distance.shape[1], -1)), axis=2)
-    index = np.argmin(distance.reshape((distance.shape[0], distance.shape[1], -1)), axis=2)
-    for i in range(FGA_cls_targets.shape[0]):
-        for j in range(FGA_cls_targets.shape[1]):
-            FGA_cls_targets[i, j, index[i, j]] = 1
-    FGA_cls_targets = FGA_cls_targets.reshape(distance.shape)
+    # four quadrant cls target
+    boundary_cls_targets = (gt_bb8_coordinates_x >= ex_ctr_x[:, np.newaxis]).astype(np.int) + \
+                           (gt_bb8_coordinates_y >= ex_ctr_y[:, np.newaxis]).astype(np.int) * 2
 
     # shape (N, 8)
-    FGA_reg_targets_dx = distance_x[FGA_cls_targets > 0].reshape((distance_x.shape[0], -1))
-    FGA_reg_targets_dx = FGA_reg_targets_dx / (ex_widths[:, np.newaxis] / granularity[1] + 1e-14) / bb8_variance[0]
-    FGA_reg_targets_dy = distance_y[FGA_cls_targets > 0].reshape((distance_y.shape[0], -1))
-    FGA_reg_targets_dy = FGA_reg_targets_dy / (ex_heights[:, np.newaxis] / granularity[0] + 1e-14) / bb8_variance[1]
+    condition_x = np.abs(gt_bb8_coordinates_x - ex_rois[:, 2:3]) < np.abs(gt_bb8_coordinates_x - ex_rois[:, 0:1])
+    boundary_reg_targets_dx_ = np.where(condition_x, gt_bb8_coordinates_x - ex_rois[:, 2:3], gt_bb8_coordinates_x - ex_rois[:, 0:1])
+    boundary_reg_targets_dx_ = boundary_reg_targets_dx_ / (ex_widths[:, np.newaxis] + 1e-14) / bb8_variance[0]
+    boundary_reg_targets_dx = np.zeros(shape=(boundary_cls_targets.shape[0] * boundary_cls_targets.shape[1], 4))
+    index_cls = np.arange(0, boundary_cls_targets.size, 1, dtype=np.int)
+    boundary_reg_targets_dx[index_cls, boundary_cls_targets.flatten()] = boundary_reg_targets_dx_.flatten()
 
-    # shape (N, 16) xyxy
-    FGA_reg_targets = np.stack((FGA_reg_targets_dx, FGA_reg_targets_dy), axis=-1).reshape((FGA_cls_targets.shape[0], -1))
-    FGA_reg_weights = np.ones_like(FGA_reg_targets)
+    condition_y = np.abs(gt_bb8_coordinates_y - ex_rois[:, 3:4]) < np.abs(gt_bb8_coordinates_y - ex_rois[:, 1:2])
+    boundary_reg_targets_dy_ = np.where(condition_y, gt_bb8_coordinates_y - ex_rois[:, 3:4], gt_bb8_coordinates_y - ex_rois[:, 1:2])
+    boundary_reg_targets_dy_ = boundary_reg_targets_dy_ / (ex_heights[:, np.newaxis] + 1e-14) / bb8_variance[1]
+    boundary_reg_targets_dy = np.zeros(shape=(boundary_cls_targets.shape[0] * boundary_cls_targets.shape[1], 4))
+    boundary_reg_targets_dy[index_cls, boundary_cls_targets.flatten()] = boundary_reg_targets_dy_.flatten()
 
-    # for softmax target  (N, 8)
-    FGA_cls_targets = np.argmax(FGA_cls_targets.reshape(FGA_cls_targets.shape[0], FGA_cls_targets.shape[1], -1), axis=2)
+    # shape (N, 8 * 4 * 2) xyxy
+    boundary_reg_targets = np.stack((boundary_reg_targets_dx, boundary_reg_targets_dy), axis=-1).reshape((boundary_cls_targets.shape[0], -1))
+    boundary_reg_weights = np.zeros(shape=(boundary_cls_targets.shape[0] * boundary_cls_targets.shape[1], 4, 2))
+    boundary_reg_weights[index_cls, boundary_cls_targets.flatten(), :] = 1
+    boundary_reg_weights = boundary_reg_weights.reshape((boundary_cls_targets.shape[0], -1))
 
-    return FGA_cls_targets, FGA_reg_targets, FGA_reg_weights
+    if DEBUG:
+        print("boundary_cls_target:", boundary_cls_targets[0])
+        print("boundary_reg_target_dx_:", boundary_reg_targets_dx_[0])
+        print("boundary_reg_targets_dy_:", boundary_reg_targets_dy_[0])
+        print("boundary_reg_targets:", boundary_reg_targets[0])
+        print("boundary_reg_weights:", boundary_reg_weights[0])
+
+    return boundary_cls_targets, boundary_reg_targets, boundary_reg_weights
 
 
-def sample_rois(rois, gt_boxes, num_classes, rois_per_image, fg_rois_per_image, fg_overlap, bb8_variance, im_info, granularity):
+def sample_rois(rois, gt_boxes, num_classes, rois_per_image, fg_rois_per_image, fg_overlap, bb8_variance, im_info):
     """
     generate random sample of ROIs comprising foreground and background examples
     :param rois: [n, 5] (batch_index, x1, y1, x2, y2)
@@ -133,7 +125,7 @@ def sample_rois(rois, gt_boxes, num_classes, rois_per_image, fg_rois_per_image, 
     """
     overlaps = bbox_overlaps(rois[:, 1:], gt_boxes[:, 1:5] * np.array([im_info[1], im_info[0], im_info[1], im_info[0]]))
     gt_assignment = overlaps.argmax(axis=1)
-    cid_labels = gt_boxes[gt_assignment, 0]
+    # cid_labels = gt_boxes[gt_assignment, 0]
     max_overlaps = overlaps.max(axis=1)
     if DEBUG:
        print("max_overlaps: {}".format(max_overlaps))
@@ -176,24 +168,24 @@ def sample_rois(rois, gt_boxes, num_classes, rois_per_image, fg_rois_per_image, 
 
     # load or compute bbox_target
     # targets = bbox_transform(rois[:, 1:], gt_boxes[gt_assignment[keep_indexes], :4], box_stds=box_stds)
-    FGA_cls_targets, FGA_reg_targets, FGA_reg_weights = \
+    boundary_cls_targets, boundary_reg_targets, boundary_reg_weights = \
         bb8_transform(rois[:, 1:], gt_boxes[gt_assignment[keep_indexes], 8:24],
-                      bb8_variance=bb8_variance, granularity=granularity, im_info=im_info)
+                      bb8_variance=bb8_variance, im_info=im_info)
 
     for i in range(fg_rois_this_image, rois_per_image):
-        FGA_cls_targets[i] = -1
-        FGA_reg_weights[i] = 0
+        boundary_cls_targets[i] = -1
+        boundary_reg_weights[i] = 0
 
     if DEBUG:
-        print("FGA_cls_targets: {}".format(FGA_cls_targets[-1]))
-        print("FGA_reg_targets: {}".format(FGA_reg_targets[-1]))
-        print("FGA_reg_weights: {}".format(FGA_reg_weights[-1]))
+        print("boundary_cls_targets: {}".format(boundary_cls_targets[-1]))
+        print("boundary_reg_targets: {}".format(boundary_reg_targets[-1]))
+        print("boundary_reg_weights: {}".format(boundary_reg_weights[-1]))
 
-    return rois, FGA_cls_targets, FGA_reg_targets, FGA_reg_weights
+    return rois, boundary_cls_targets, boundary_reg_targets, boundary_reg_weights
 
 
 class BB8ProposalTargetOperator(mx.operator.CustomOp):
-    def __init__(self, num_keypoints, batch_images, batch_rois, fg_fraction, fg_overlap, bb8_variance, im_info, granularity):
+    def __init__(self, num_keypoints, batch_images, batch_rois, fg_fraction, fg_overlap, bb8_variance, im_info):
         super(BB8ProposalTargetOperator, self).__init__()
         self._num_keypoints = num_keypoints
         self._batch_images = batch_images
@@ -203,7 +195,6 @@ class BB8ProposalTargetOperator(mx.operator.CustomOp):
         self._fg_overlap = fg_overlap
         self._bb8_variance = bb8_variance
         self._im_info = im_info
-        self._granularity = granularity
 
     def forward(self, is_train, req, in_data, out_data, aux):
         assert self._batch_images == in_data[1].shape[0], 'check batch size of gt_boxes'
@@ -215,9 +206,9 @@ class BB8ProposalTargetOperator(mx.operator.CustomOp):
             print("all_gt_boxes shape: {}".format(all_gt_boxes.shape))
 
         rois = np.empty((0, 5), dtype=np.float32)
-        bb8_FGA_cls_target = np.empty((0, self._num_keypoints), dtype=np.float32)
-        bb8_FGA_reg_target = np.empty((0, 2 * self._num_keypoints), dtype=np.float32)
-        bb8_FGA_reg_weight = np.empty((0, 2 * self._num_keypoints), dtype=np.float32)
+        bb8_boundary_cls_target = np.empty((0, self._num_keypoints), dtype=np.float32)
+        bb8_boundary_reg_target = np.empty((0, 2 * self._num_keypoints * 4), dtype=np.float32)
+        bb8_boundary_reg_weight = np.empty((0, 2 * self._num_keypoints * 4), dtype=np.float32)
         for batch_idx in range(self._batch_images):
             b_rois = all_rois[np.where(all_rois[:, 0] == batch_idx)[0]]
             b_gt_boxes = all_gt_boxes[batch_idx]
@@ -232,30 +223,30 @@ class BB8ProposalTargetOperator(mx.operator.CustomOp):
                 print("b_rois: {}".format(b_rois[-1]))
                 print("b_gt_boxes: {}".format(b_gt_boxes[0]))
 
-            b_rois, b_bb8_FGA_cls_target, b_bb8_FGA_reg_target, b_bb8_FGA_reg_weight = \
+            b_rois, b_bb8_boundary_cls_target, b_bb8_boundary_reg_target, b_bb8_boundary_reg_weight = \
                 sample_rois(b_rois, b_gt_boxes, num_classes=self._num_keypoints, rois_per_image=self._rois_per_image,
                             fg_rois_per_image=self._fg_rois_per_image, fg_overlap=self._fg_overlap, bb8_variance=self._bb8_variance,
-                            im_info=self._im_info, granularity=self._granularity)
+                            im_info=self._im_info)
 
             rois = np.vstack((rois, b_rois))
-            bb8_FGA_cls_target = np.concatenate((bb8_FGA_cls_target, b_bb8_FGA_cls_target), axis=0)
-            bb8_FGA_reg_target = np.vstack((bb8_FGA_reg_target, b_bb8_FGA_reg_target))
-            bb8_FGA_reg_weight = np.vstack((bb8_FGA_reg_weight, b_bb8_FGA_reg_weight))
+            bb8_boundary_cls_target = np.concatenate((bb8_boundary_cls_target, b_bb8_boundary_cls_target), axis=0)
+            bb8_boundary_reg_target = np.vstack((bb8_boundary_reg_target, b_bb8_boundary_reg_target))
+            bb8_boundary_reg_weight = np.vstack((bb8_boundary_reg_weight, b_bb8_boundary_reg_weight))
 
         self.assign(out_data[0], req[0], rois)
-        self.assign(out_data[1], req[1], bb8_FGA_cls_target)
-        self.assign(out_data[2], req[2], bb8_FGA_reg_target)
-        self.assign(out_data[3], req[3], bb8_FGA_reg_weight)
+        self.assign(out_data[1], req[1], bb8_boundary_cls_target)
+        self.assign(out_data[2], req[2], bb8_boundary_reg_target)
+        self.assign(out_data[3], req[3], bb8_boundary_reg_weight)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
         self.assign(in_grad[0], req[0], 0)
         self.assign(in_grad[1], req[1], 0)
 
 
-@mx.operator.register('bb8_proposal_FGAtarget_cls_softmax_reg_offset')
+@mx.operator.register('bb8_proposal_target_boundary_offset')
 class BB8ProposalTargetProp(mx.operator.CustomOpProp):
     def __init__(self, num_keypoints='8', batch_images='1', batch_rois='128', fg_fraction='0.25',
-                 fg_overlap='0.5', bb8_variance='(0.1, 0.1)', im_info='(512, 512, 1)', granularity='(3, 3)'):
+                 fg_overlap='0.5', bb8_variance='(0.1, 0.1)', im_info='(512, 512, 1)'):
         super(BB8ProposalTargetProp, self).__init__(need_top_grad=False)
         self._num_keypoints = int(num_keypoints)
         self._batch_images = int(batch_images)
@@ -264,13 +255,12 @@ class BB8ProposalTargetProp(mx.operator.CustomOpProp):
         self._fg_overlap = float(fg_overlap)
         self._bb8_variance = tuple(np.fromstring(bb8_variance[1:-1], dtype=float, sep=','))
         self._im_info = tuple(np.fromstring(im_info[1:-1], dtype=float, sep=','))
-        self._granularity = tuple(np.fromstring(granularity[1:-1], dtype=int, sep=','))
 
     def list_arguments(self):
         return ['rois', 'gt_boxes']
 
     def list_outputs(self):
-        return ['rois_output', 'bb8_FGA_cls_target', 'bb8_FGA_reg_target', 'bb8_FGA_reg_weight']
+        return ['rois_output', 'bb8_boundary_cls_target', 'bb8_boundary_reg_target', 'bb8_boundary_reg_weight']
 
     def infer_shape(self, in_shape):
         assert self._batch_rois % self._batch_images == 0, \
@@ -280,20 +270,20 @@ class BB8ProposalTargetProp(mx.operator.CustomOpProp):
         gt_boxes_shape = in_shape[1]     # (batchsize, padded_label_instances, 40)
 
         output_rois_shape = (self._batch_rois, 5)
-        bb8_FGA_cls_target_shape = (self._batch_rois, self._num_keypoints)
+        bb8_boundary_cls_target_shape = (self._batch_rois, self._num_keypoints)
         # bb8_FGA_cls-agnostic regression
         # bb8_FGA_reg_target_shape = (self._batch_rois, self._num_keypoints * 2)
         # bb8_FGA_reg_weight_shape = (self._batch_rois, self._num_keypoints * 2)
         # bb8_FGA_cls-specific regression, adopt heatmap form
-        bb8_FGA_reg_target_shape = (self._batch_rois, self._num_keypoints * 2)
-        bb8_FGA_reg_weight_shape = (self._batch_rois, self._num_keypoints * 2)
+        bb8_boundary_reg_target_shape = (self._batch_rois, self._num_keypoints * 2 * 4)
+        bb8_boundary_reg_weight_shape = (self._batch_rois, self._num_keypoints * 2 * 4)
 
         return [rpn_rois_shape, gt_boxes_shape], \
-               [output_rois_shape, bb8_FGA_cls_target_shape, bb8_FGA_reg_target_shape, bb8_FGA_reg_weight_shape]
+               [output_rois_shape, bb8_boundary_cls_target_shape, bb8_boundary_reg_target_shape, bb8_boundary_reg_weight_shape]
 
     def create_operator(self, ctx, shapes, dtypes):
         return BB8ProposalTargetOperator(self._num_keypoints, self._batch_images, self._batch_rois, self._fg_fraction,
-                                      self._fg_overlap, self._bb8_variance, self._im_info, self._granularity)
+                                      self._fg_overlap, self._bb8_variance, self._im_info)
 
     def declare_backward_dependency(self, out_grad, in_data, out_data):
         return []

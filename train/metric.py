@@ -33,10 +33,10 @@ class MultiBoxMetric_RCNN_offset(mx.metric.EvalMetric):
         loc_loss = preds[1].asnumpy()
         cls_label = preds[2].asnumpy()
         rpn_loc_target = preds[3].asnumpy()
-        # rpn_loc_target_valid = rpn_loc_target[np.nonzero(rpn_loc_target)]
-        # rpn_loc_target_valid_abs_mean = np.mean(np.abs(rpn_loc_target_valid))
-        # rpn_loc_target_valid_mean = np.mean(rpn_loc_target_valid)
-        # rpn_loc_target_valid_variance = np.var(rpn_loc_target_valid)
+        rpn_loc_target_valid = rpn_loc_target[np.nonzero(rpn_loc_target)]
+        rpn_loc_target_valid_abs_mean = np.mean(np.abs(rpn_loc_target_valid))
+        rpn_loc_target_valid_mean = np.mean(rpn_loc_target_valid)
+        rpn_loc_target_valid_variance = np.var(rpn_loc_target_valid)
         dets = preds[4].asnumpy()
         dets_valid_index = np.where(dets[:,:, 0] >= 0)
         dets_valid = dets[dets_valid_index[0], dets_valid_index[1]]
@@ -70,9 +70,9 @@ class MultiBoxMetric_RCNN_offset(mx.metric.EvalMetric):
         rcnn_bb8offset_reg_target = preds[8].asnumpy()    # shape (N_rois, 2*num_keypoints)
         rcnn_bb8offset_reg_loss = preds[9].asnumpy()    # shape (N_rois, 2*num_keypoints)
 
-        # rcnn_FGA_reg_target_abs_mean = np.mean(np.abs(rcnn_FGA_reg_target))
-        # rcnn_FGA_reg_target_mean = np.mean(rcnn_FGA_reg_target)
-        # rcnn_FGA_reg_target_variance = np.var(rcnn_FGA_reg_target)
+        rcnn_FGA_reg_target_abs_mean = np.mean(np.abs(rcnn_bb8offset_reg_target))
+        rcnn_FGA_reg_target_mean = np.mean(rcnn_bb8offset_reg_target)
+        rcnn_FGA_reg_target_variance = np.var(rcnn_bb8offset_reg_target)
 
         # bb8offset reg loss update
         rcnn_valid_count = len(np.nonzero(rcnn_bb8offset_reg_target)[0])
@@ -337,6 +337,117 @@ class MultiBoxMetric_FGARCNN_cls_softmax_reg_offset(mx.metric.EvalMetric):
                 for x, y in zip(self.sum_metric, self.num_inst)]
             return (names, values)
 
+class MultiBoxMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
+    """Calculate metrics for Multibox training """
+    def __init__(self, eps=1e-8):
+        super(MultiBoxMetric_RCNN_boundary_offset, self).__init__('MultiBox_softmax')
+        self.eps = eps
+        self.num = 5
+        self.name = ['rpn_CrossEntropy', 'rpn_SmoothL1', 'rcnn_boundary_cls_CrossEntropy', 'rcnn_boundary_cls_accuracy',
+                     'rcnn_boundary_bb8_pred_SmoothL1']
+        self.reset()
+
+    def reset(self):
+        """
+        override reset behavior
+        """
+        if getattr(self, 'num', None) is None:
+            self.num_inst = 0
+            self.sum_metric = 0.0
+        else:
+            self.num_inst = [0] * self.num
+            self.sum_metric = [0.0] * self.num
+
+    def update(self, labels, preds):
+        """
+        Implementation of updating metrics
+        """
+        # get generated multi label from network
+        labels = labels[0].asnumpy()
+        cls_prob = preds[0].asnumpy()
+        loc_loss = preds[1].asnumpy()
+        cls_label = preds[2].asnumpy()
+        rpn_loc_target = preds[3].asnumpy()
+        # rpn_loc_target_valid = rpn_loc_target[np.nonzero(rpn_loc_target)]
+        # rpn_loc_target_valid_abs_mean = np.mean(np.abs(rpn_loc_target_valid))
+        # rpn_loc_target_valid_mean = np.mean(rpn_loc_target_valid)
+        # rpn_loc_target_valid_variance = np.var(rpn_loc_target_valid)
+        dets = preds[4].asnumpy()
+        dets_valid_index = np.where(dets[:,:, 0] >= 0)
+        dets_valid = dets[dets_valid_index[0], dets_valid_index[1]]
+
+        # ssd as rpn loss count
+        valid_count = np.sum(cls_label >= 0)
+        # overall accuracy & object accuracy
+        label = cls_label.flatten()
+        # in case you have a 'other' class
+        label[np.where(label >= cls_prob.shape[1])] = 0
+        mask = np.where(label >= 0)[0]
+        indices = np.int64(label[mask])
+        prob = cls_prob.transpose((0, 2, 1)).reshape((-1, cls_prob.shape[1]))
+        prob = prob[mask, indices]
+        self.sum_metric[0] += (-np.log(prob + self.eps)).sum()
+        self.num_inst[0] += valid_count
+        # smoothl1loss
+        self.sum_metric[1] += np.sum(loc_loss)
+        self.num_inst[1] += valid_count
+
+        # rpn proposals
+        # rpn_rois = preds[5].asnumpy()
+        # rpn_score = preds[6].asnumpy()
+        # rpn_cid = preds[7].asnumpy()
+
+        # rcnn boundary loss count
+        rcnn_boundary_cls_target = preds[8].asnumpy()    # shape (N_rois, num_keypoints)
+        rcnn_boundary_reg_target = preds[9].asnumpy()    # shape (N_rois, 2*num_keypoints*4)
+        rcnn_boundary_cls_prob = preds[10].asnumpy()     # shape (N_rois, num_keypoints, 4)
+        rcnn_boundary_reg_loss = preds[11].asnumpy()
+
+        # rcnn_boundary_reg_target_abs_mean = np.mean(np.abs(rcnn_boundary_reg_target))
+        # rcnn_boundary_reg_target_mean = np.mean(rcnn_boundary_reg_target)
+        # rcnn_boundary_reg_target_variance = np.var(rcnn_boundary_reg_target)
+
+
+        # softmax version loss update
+        rcnn_valid_count = np.sum(rcnn_boundary_cls_target >= 0)
+        rcnn_boundary_cls_target = rcnn_boundary_cls_target.flatten()
+        rcnn_mask = np.where(rcnn_boundary_cls_target >= 0)[0]
+        rcnn_indices = np.int64(rcnn_boundary_cls_target[rcnn_mask])
+        rcnn_prob = rcnn_boundary_cls_prob.reshape((-1, rcnn_boundary_cls_prob.shape[2]))
+        rcnn_prob = rcnn_prob[rcnn_mask, rcnn_indices]
+        self.sum_metric[2] += (-np.log(rcnn_prob +self.eps)).sum()
+        self.num_inst[2] += rcnn_valid_count
+
+        max_pred_prob_indices = np.argmax(rcnn_boundary_cls_prob.reshape((-1, rcnn_boundary_cls_prob.shape[2])), axis=-1)
+        max_pred_prob_indices = max_pred_prob_indices[rcnn_mask]
+        accuracy = np.sum(max_pred_prob_indices == rcnn_indices)
+        self.sum_metric[3] += np.sum(accuracy)
+        self.num_inst[3] += rcnn_valid_count
+        # smoothl1loss
+        self.sum_metric[4] += np.sum(rcnn_boundary_reg_loss)
+        self.num_inst[4] += rcnn_valid_count * 2
+
+    def get(self):
+        """Get the current evaluation result.
+        Override the default behavior
+
+        Returns
+        -------
+        name : str
+           Name of the metric.
+        value : float
+           Value of the evaluation.
+        """
+        if self.num is None:
+            if self.num_inst == 0:
+                return (self.name, float('nan'))
+            else:
+                return (self.name, self.sum_metric / self.num_inst)
+        else:
+            names = ['%s'%(self.name[i]) for i in range(self.num)]
+            values = [x / y if y != 0 else float('nan') \
+                for x, y in zip(self.sum_metric, self.num_inst)]
+            return (names, values)
 
 class MultiBoxMetric_heatmap(mx.metric.EvalMetric):
     """Calculate metrics for Multibox training """

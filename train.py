@@ -18,7 +18,7 @@ def parse_args():
                         default="", type=str)
     parser.add_argument('--network', dest='network', type=str, default='resnet50m',
                         help='which network to use')
-    parser.add_argument('--mode', dest='mode', type=str, default='RCNN_offset',
+    parser.add_argument('--mode', dest='mode', type=str, default='RCNN_boundary_offset',
                         help='which mode to use')
     parser.add_argument('--batch-size', dest='batch_size', type=int, default=4,
                         help='training batch size')
@@ -34,9 +34,9 @@ def parse_args():
     parser.add_argument('--epoch', dest='epoch', help='epoch of pretrained model',
                         default=0, type=int)
     parser.add_argument('--prefix', dest='prefix', help='new model prefix',
-                        default=os.path.join(os.getcwd(), 'output', 'OCCLUSION', 'rcnn_bb8offset', 'rcnn'), type=str)
+                        default=os.path.join(os.getcwd(), 'output', 'OCCLUSION', 'rcnn-boundary-offset-resnet50m-512-stage3-7-size0.1-0.5', 'rcnn'), type=str)
     parser.add_argument('--gpus', dest='gpus', help='GPU devices to train with',
-                        default='2,3', type=str)
+                        default='0', type=str)
     parser.add_argument('--begin-epoch', dest='begin_epoch', help='begin epoch of training',
                         default=0, type=int)
     parser.add_argument('--end-epoch', dest='end_epoch', help='end epoch of training',

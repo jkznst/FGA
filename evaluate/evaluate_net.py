@@ -11,7 +11,8 @@ import cv2
 from tqdm import tqdm
 from dataset.iterator import DetRecordIter
 from config.config import cfg
-from evaluate.eval_metric import MApMetric, VOC07MApMetric, PoseMetric, PoseMetric_offset, PoseMetric_MaskRCNN_keypoint
+import evaluate.eval_metric as eval_metric
+# from evaluate.eval_metric import MApMetric, VOC07MApMetric, PoseMetric, PoseMetric_offset, PoseMetric_MaskRCNN_keypoint, PoseMetric_FGARCNN_cls_softmax_reg_offset
 import logging
 from symbol.symbol_factory import get_symbol
 from MultiBoxDetection import BB8MultiBoxDetection
@@ -165,13 +166,13 @@ def evaluate_net(net, mode, path_imgrec, num_classes, mean_pixels, data_shape,
 
     # run evaluation
     if voc07_metric:
-        metric = VOC07MApMetric(ovp_thresh, use_difficult, class_names,
+        metric = eval_metric.VOC07MApMetric(ovp_thresh, use_difficult, class_names,
                                 roc_output_path=os.path.join(os.path.dirname(model_prefix), 'roc'))
     else:
-        metric = MApMetric(ovp_thresh, use_difficult, class_names,
+        metric = eval_metric.MApMetric(ovp_thresh, use_difficult, class_names,
                             roc_output_path=os.path.join(os.path.dirname(model_prefix), 'roc'))
 
-    posemetric = PoseMetric_MaskRCNN_keypoint(LINEMOD_path='/media/DataDisk2_4T/zhangxin/DATASETS/SIXD_CHALLENGE/LINEMOD/', classes=class_names)
+    posemetric = getattr(eval_metric, "PoseMetric_{}".format(mode))(LINEMOD_path='/media/DataDisk2_4T/zhangxin/DATASETS/SIXD_CHALLENGE/LINEMOD/', classes=class_names)
 
     # visualize bb8 results
     # for nbatch, eval_batch in tqdm(enumerate(eval_iter)):
@@ -241,4 +242,18 @@ def evaluate_net(net, mode, path_imgrec, num_classes, mean_pixels, data_shape,
         # for k, v in metric.counts.items():
         #     f.write("{}: {}\n".format(k, v))
         pickle.dump(posemetric.counts, f, protocol=2)
+        f.close()
+
+    boundaryclsprob_save_path = os.path.join(os.path.dirname(model_prefix), 'boundary_cls_prob')
+    with open(boundaryclsprob_save_path, 'wb') as f:
+        # for k, v in metric.Reproj.items():
+        #     f.write("{}: {}\n".format(k, v))
+        pickle.dump(posemetric.BoundaryClsProb, f, protocol=2)
+        f.close()
+
+    boundaryregerror_save_path = os.path.join(os.path.dirname(model_prefix), 'boundary_reg_error')
+    with open(boundaryregerror_save_path, 'wb') as f:
+        # for k, v in metric.Reproj.items():
+        #     f.write("{}: {}\n".format(k, v))
+        pickle.dump(posemetric.BoundaryRegError, f, protocol=2)
         f.close()

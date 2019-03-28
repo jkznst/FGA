@@ -168,6 +168,130 @@ def TransformRCNNFGABB8(rois_concat, rcnn_FGA_cls_score_concat, rcnn_FGA_bb8_pre
 
     return out
 
+def TransformFGARCNNBB8ClsSoftmaxRegOffset(rois_concat, rcnn_FGA_cls_score_concat, rcnn_FGA_bb8_pred_concat,
+                        clip=True, variances=(0.1, 0.1)):
+    """
+    :param rois_concat: batchsize x num_anchors x 4
+    :param rcnn_FGA_cls_score_concat: batchsize x num_anchors x num_keypoints x granularity[0] x granularity[1]
+    :param rcnn_FGA_bb8_pred_concat: batchsize x num_anchors x (2x num_keypoints)
+    :param clip: (boolean, optional, default=True) clip out-of-boundary boxes
+    :param variances: (tuple of, optional, default=(0.1,0.1,0.2,0.2)) variances to be decoded from box regression output
+    :return: output: batchsize x num_anchors x 16, locations in [x, y, x, y, ...]
+    """
+    batchsize = rois_concat.shape[0]
+    num_anchors = rois_concat.shape[1]
+    num_keypoints = rcnn_FGA_cls_score_concat.shape[2]
+    granularity = tuple([rcnn_FGA_cls_score_concat.shape[3], rcnn_FGA_cls_score_concat.shape[4]])
+    # bb8_pred = mx.nd.reshape(bb8_pred, shape=(0, -1, 16))
+
+    al = rois_concat[:, :, 0:1]
+    at = rois_concat[:, :, 1:2]
+    ar = rois_concat[:, :, 2:3]
+    ab = rois_concat[:, :, 3:4]
+    aw = ar - al
+    ah = ab - at
+    acx = (al + ar) / 2.0
+    acy = (at + ab) / 2.0
+
+    # fine grained anchor centers
+    ex_FGA_ctr_x = np.zeros(shape=(batchsize, num_anchors, 1, granularity[1]))
+    ex_FGA_ctr_y = np.zeros(shape=(batchsize, num_anchors, granularity[0], 1))
+    for i in range(granularity[1]):
+        ex_FGA_ctr_x[:, :, 0, i:i+1] = acx + (i - int((granularity[1] - 1) / 2)) * aw / granularity[1]
+    ex_FGA_ctr_x = np.repeat(ex_FGA_ctr_x, repeats=granularity[0], axis=2)
+    for i in range(granularity[0]):
+        ex_FGA_ctr_y[:, :, i:i+1, 0] = acy + (i - int((granularity[0] - 1) / 2)) * ah / granularity[0]
+    ex_FGA_ctr_y = np.repeat(ex_FGA_ctr_y, repeats=granularity[1], axis=3)
+
+    ex_FGA_ctr_x = np.reshape(ex_FGA_ctr_x, newshape=(batchsize, num_anchors, -1))
+    ex_FGA_ctr_x = np.repeat(ex_FGA_ctr_x[:, :, np.newaxis], repeats=num_keypoints, axis=2)
+    ex_FGA_ctr_y = np.reshape(ex_FGA_ctr_y, newshape=(batchsize, num_anchors, -1))
+    ex_FGA_ctr_y = np.repeat(ex_FGA_ctr_y[:, :, np.newaxis], repeats=num_keypoints, axis=2)
+
+    rcnn_FGA_cls_score_concat = rcnn_FGA_cls_score_concat.reshape((batchsize, num_anchors, num_keypoints, -1))
+    rcnn_FGA_cls_prob = np.exp(rcnn_FGA_cls_score_concat) / np.sum(np.exp(rcnn_FGA_cls_score_concat), axis=-1, keepdims=True)
+    FGA_id = np.argmax(rcnn_FGA_cls_score_concat, axis=-1)
+    rcnn_FGA_bb8_pred_concat = rcnn_FGA_bb8_pred_concat.reshape((batchsize, num_anchors, num_keypoints, 2))
+
+    index_0 = np.repeat(np.arange(0, batchsize), repeats=num_anchors * num_keypoints)
+    index_0 = np.reshape(index_0, newshape=(batchsize, num_anchors, num_keypoints))
+    index_1 = np.repeat(np.arange(0, num_anchors), repeats=num_keypoints)
+    index_1 = np.tile(index_1, reps=batchsize)
+    index_1 = np.reshape(index_1, newshape=(batchsize, num_anchors, num_keypoints))
+    index_2x = np.tile(np.arange(0, num_keypoints), reps=batchsize * num_anchors)
+    index_2y = np.tile(np.arange(num_keypoints, 2 * num_keypoints), reps=batchsize * num_anchors)
+    index_2x = np.reshape(index_2x, newshape=(batchsize, num_anchors, num_keypoints))
+    index_2y = np.reshape(index_2y, newshape=(batchsize, num_anchors, num_keypoints))
+
+    rcnn_FGA_bb8_delta_x_pick = rcnn_FGA_bb8_pred_concat[:, :, :, 0]
+    rcnn_FGA_bb8_delta_y_pick = rcnn_FGA_bb8_pred_concat[:, :, :, 1]
+    # rcnn_FGA_bb8_delta_x_pick = rcnn_FGA_bb8_pred_concat[:, :, :, 0]
+    # rcnn_FGA_bb8_delta_y_pick = rcnn_FGA_bb8_pred_concat[:, :, :, 1]
+    ex_FGA_ctr_x_pick = ex_FGA_ctr_x[index_0, index_1, index_2x, FGA_id]
+    ex_FGA_ctr_y_pick = ex_FGA_ctr_y[index_0, index_1, index_2x, FGA_id]
+    ex_FGA_ctr_prob_pick = rcnn_FGA_cls_prob[index_0, index_1, index_2x, FGA_id]
+
+    rcnn_FGA_bb8_pred_x = rcnn_FGA_bb8_delta_x_pick * aw * variances[0] / granularity[1] + ex_FGA_ctr_x_pick
+    rcnn_FGA_bb8_pred_y = rcnn_FGA_bb8_delta_y_pick * ah * variances[1] / granularity[0] + ex_FGA_ctr_y_pick
+
+    out = np.stack((rcnn_FGA_bb8_pred_x, rcnn_FGA_bb8_pred_y),axis=-1)
+    out = np.reshape(out, newshape=(batchsize, num_anchors, 2 * num_keypoints))   # the last dimension is [x,y,x,y,...]
+
+    if clip:
+        out = np.maximum(0, np.minimum(1, out))
+
+    return out, ex_FGA_ctr_prob_pick
+
+def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, rcnn_boundary_bb8_pred_concat,
+                        clip=True, variances=(0.1, 0.1)):
+    """
+    :param rois_concat: batchsize x num_anchors x 4
+    :param rcnn_boundary_cls_score_concat: batchsize x num_anchors x num_keypoints x 4
+    :param rcnn_boundary_bb8_pred_concat: batchsize x num_anchors x (2x num_keypoints x 4)
+    :param clip: (boolean, optional, default=True) clip out-of-boundary boxes
+    :param variances: (tuple of, optional, default=(0.1,0.1,0.2,0.2)) variances to be decoded from box regression output
+    :return: output: batchsize x num_anchors x 16, locations in [x, y, x, y, ...]
+    """
+    batchsize = rois_concat.shape[0]
+    num_anchors = rois_concat.shape[1]
+    num_keypoints = rcnn_boundary_cls_score_concat.shape[2]
+
+    al = rois_concat[:, :, 0:1]
+    at = rois_concat[:, :, 1:2]
+    ar = rois_concat[:, :, 2:3]
+    ab = rois_concat[:, :, 3:4]
+    aw = ar - al
+    ah = ab - at
+
+    rcnn_boundary_cls_prob = np.exp(rcnn_boundary_cls_score_concat) / np.sum(np.exp(rcnn_boundary_cls_score_concat), axis=-1, keepdims=True)
+    boundary_id = np.argmax(rcnn_boundary_cls_score_concat, axis=-1)
+    rcnn_boundary_confidence = np.max(rcnn_boundary_cls_prob, axis=-1)
+
+    condition_boundary_l = (boundary_id % 2 == 0)
+    condition_boundary_t = (boundary_id < 2)
+
+    # rcnn_boundary_bb8_pred_concat = rcnn_boundary_bb8_pred_concat.reshape((batchsize, num_anchors, num_keypoints, 2))
+    # rcnn_boundary_bb8_delta_x = rcnn_boundary_bb8_pred_concat[:, :, :, 0]
+    # rcnn_boundary_bb8_delta_y = rcnn_boundary_bb8_pred_concat[:, :, :, 1]
+
+    rcnn_boundary_bb8_pred_concat = rcnn_boundary_bb8_pred_concat.reshape((batchsize, num_anchors, num_keypoints, 4, 2))
+    index_0 = np.repeat(np.arange(0, batchsize), repeats=num_anchors * num_keypoints).reshape((boundary_id.shape[0], boundary_id.shape[1], boundary_id.shape[2]))
+    index_1 = np.tile(np.repeat(np.arange(0, num_anchors), repeats=num_keypoints), reps=batchsize).reshape((boundary_id.shape[0], boundary_id.shape[1], boundary_id.shape[2]))
+    index_2 = np.tile(np.arange(0, num_keypoints), reps=batchsize * num_anchors).reshape((boundary_id.shape[0], boundary_id.shape[1], boundary_id.shape[2]))
+    rcnn_boundary_bb8_delta_x = rcnn_boundary_bb8_pred_concat[index_0, index_1, index_2, boundary_id, 0]
+    rcnn_boundary_bb8_delta_y = rcnn_boundary_bb8_pred_concat[index_0, index_1, index_2, boundary_id, 1]
+
+    rcnn_boundary_bb8_pred_x = rcnn_boundary_bb8_delta_x * aw * variances[0] + np.where(condition_boundary_l, al, ar)
+    rcnn_boundary_bb8_pred_y = rcnn_boundary_bb8_delta_y * ah * variances[1] + np.where(condition_boundary_t, at, ab)
+
+    out = np.stack((rcnn_boundary_bb8_pred_x, rcnn_boundary_bb8_pred_y),axis=-1)
+    out = np.reshape(out, newshape=(batchsize, num_anchors, 2 * num_keypoints))   # the last dimension is [x,y,x,y,...]
+
+    if clip:
+        out = np.maximum(0, np.minimum(1, out))
+
+    return out, rcnn_boundary_confidence
+
 def TransformMaskRCNNKeypointBB8(rois_concat, maskrcnn_keypoint_cls_score_concat,
                         clip=True):
     """
@@ -623,6 +747,191 @@ def MaskRCNNKeypointBB8MultiBoxDetection(rois_concat, score_concat, cid_concat, 
         out[nbatch, :, :] = p_out
 
     return out
+
+def FGARCNNClsSoftmaxRegOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat,
+                                                   FGA_cls_score_concat, FGA_reg_pred_concat,
+                    threshold=0.01, clip=True, background_id=0, nms_threshold=0.45, force_suppress=False,
+                    nms_topk=400, name=None, im_info=(512,512,1)):
+    """
+    Parameters:
+    :param rois_concat: batchsize x (num_post_nms x num_fpn) x 5
+    :param score_concat: batchsize x (num_post_nms x num_fpn) x 1
+    :param cid_concat: batchsize x (num_post_nms x num_fpn) x 1
+    :param FGA_cls_score_concat: (batchsize x num_post_nms) x num_keypoints x granularity[0] x granularity[1]
+    :param FGA_reg_pred_concat: (batchsize x num_post_nms) x (2*num_keypoints)
+    :param threshold: (float, optional, default=0.01) threshold to be a positive prediction
+    :param clip: (boolean, optional, default=True) clip out-of-boundary boxes
+    :param background_id: (int optional, default='0') background id
+    :param nms_threshold: (float, optional, default=0.5) non-maximum suppression threshold
+    :param force_suppress: (boolean, optional, default=False) suppress all detections regardless of class_id
+    :param variances: (tuple of, optional, default=(0.1,0.1)) variances to be decoded from box regression output
+    :param nms_topk: (int, optional, default=-1) keep maximum top k detections before nms, -1 for no limit.
+    :param out: (NDArray, optional) the output NDArray to hold the result.
+    :param name:
+
+    :return: out: (NDArray or list of NDArray) the output of this function.
+    """
+    assert background_id == 0, "No implementation for background_id is not 0!!"
+    # assert len(variances) == 2, "Variance size must be 2"
+    assert nms_threshold > 0, "NMS_threshold should be greater than 0!!!"
+    assert nms_threshold <=1, "NMS_threshold should be less than 1!!!"
+
+    # ctx = cls_prob.context
+    num_batches = score_concat.shape[0]
+    num_rois_per_image = score_concat.shape[1]
+    num_keypoints = FGA_cls_score_concat.shape[1]
+    num_classes = int(np.max(cid_concat) + 1)
+    granularity = tuple([FGA_cls_score_concat.shape[2], FGA_cls_score_concat.shape[3]])
+    rois_concat[:, 1:5] /= np.array([im_info[1], im_info[0], im_info[1], im_info[0]])
+    rois_concat = rois_concat.reshape((num_batches, num_rois_per_image, 5))
+    FGA_cls_score_concat = np.reshape(FGA_cls_score_concat,
+                                           newshape=(num_batches, num_rois_per_image, num_keypoints,
+                                                    granularity[0],
+                                                    granularity[1]))
+
+    out = np.ones(shape=(num_batches, num_rois_per_image, 22)) * -1
+    # remove background, restore original id
+    out[:, :, 0:1] = cid_concat
+    out[:, :, 1:2] = score_concat
+    out[:, :, 2:6] = rois_concat[:, :, 1:5]
+    out[:, :, 6:22], bb8_confidence = TransformFGARCNNBB8ClsSoftmaxRegOffset(rois_concat[:, :, 1:5], FGA_cls_score_concat, FGA_reg_pred_concat, clip,
+                                                                             variances=(0.2, 0.2))
+    out = mx.nd.array(out)
+    bb8_confidence = mx.nd.array(bb8_confidence)
+
+    # if the score < positive threshold, reset the id and score to -1
+    out[:, :, 0] = mx.nd.where(condition=out[:, :, 1]<threshold,
+                x=mx.nd.ones_like(out[:, :, 1]) * -1,
+                y=out[:, :, 0])
+    out[:, :, 1] = mx.nd.where(condition=out[:, :, 1] < threshold,
+                               x=mx.nd.ones_like(out[:, :, 1]) * -1,
+                               y=out[:, :, 1])
+
+    valid_count = mx.nd.sum(out[:, :, 0] >= 0, axis=0, keepdims=False, exclude=True)
+    valid_count = valid_count.asnumpy()
+
+    #*******************************************************************************************
+
+    for nbatch in range(num_batches):
+        p_out = out[nbatch, :, :]
+        p_bb8_confidence = bb8_confidence[nbatch, :, :]
+
+        if (valid_count[nbatch] < 1) or (nms_threshold <= 0) or (nms_threshold > 1):
+            continue
+
+        # sort and apply NMS
+        nkeep = nms_topk if nms_topk<valid_count[nbatch] else int(valid_count[nbatch])
+        # sort confidence in descend order and re-order output
+        p_out[0:nkeep] = p_out[p_out[:, 1].topk(k=nkeep)]
+        p_bb8_confidence[0:nkeep] = p_bb8_confidence[p_out[:, 1].topk(k=nkeep)]
+        # p_out[nkeep:, 0] = -1    # not performed in original mxnet MultiBoxDetection, add by zhangxin
+
+        # apply nms
+        keep_indices = nms(p_out[0:nkeep], nms_threshold, force_suppress, num_classes)
+        keep_indices = np.array(keep_indices)
+        p_out[0:len(keep_indices)] = p_out[keep_indices]
+        p_bb8_confidence[0:len(keep_indices)] = p_bb8_confidence[keep_indices]
+        if len(keep_indices) < p_out.shape[0]:
+            p_out[len(keep_indices):, 0] = -1
+        out[nbatch, :, :] = p_out
+        bb8_confidence[nbatch, :, :] = p_bb8_confidence
+
+    return out, bb8_confidence
+
+def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat,
+                                                   boundary_cls_score_concat, boundary_reg_pred_concat,
+                    threshold=0.01, clip=True, background_id=0, nms_threshold=0.45, force_suppress=False,
+                    nms_topk=400, name=None, im_info=(512,512,1), variance=(0.1, 0.1)):
+    """
+    Parameters:
+    :param rois_concat: batchsize x (num_post_nms x num_fpn) x 5
+    :param score_concat: batchsize x (num_post_nms x num_fpn) x 1
+    :param cid_concat: batchsize x (num_post_nms x num_fpn) x 1
+    :param boundary_cls_score_concat: (batchsize x num_post_nms) x num_keypoints x 4
+    :param boundary_reg_pred_concat: (batchsize x num_post_nms) x (2*num_keypoints)
+    :param threshold: (float, optional, default=0.01) threshold to be a positive prediction
+    :param clip: (boolean, optional, default=True) clip out-of-boundary boxes
+    :param background_id: (int optional, default='0') background id
+    :param nms_threshold: (float, optional, default=0.5) non-maximum suppression threshold
+    :param force_suppress: (boolean, optional, default=False) suppress all detections regardless of class_id
+    :param variances: (tuple of, optional, default=(0.1,0.1)) variances to be decoded from box regression output
+    :param nms_topk: (int, optional, default=-1) keep maximum top k detections before nms, -1 for no limit.
+    :param out: (NDArray, optional) the output NDArray to hold the result.
+    :param name:
+
+    :return: out: (NDArray or list of NDArray) the output of this function.
+    """
+    assert background_id == 0, "No implementation for background_id is not 0!!"
+    # assert len(variances) == 2, "Variance size must be 2"
+    assert nms_threshold > 0, "NMS_threshold should be greater than 0!!!"
+    assert nms_threshold <=1, "NMS_threshold should be less than 1!!!"
+
+    # ctx = cls_prob.context
+    num_batches = score_concat.shape[0]
+    num_rois_per_image = score_concat.shape[1]
+    num_keypoints = boundary_cls_score_concat.shape[1]
+    num_classes = int(np.max(cid_concat) + 1)
+
+    rois_concat[:, 1:5] /= np.array([im_info[1], im_info[0], im_info[1], im_info[0]])
+    rois_concat = rois_concat.reshape((num_batches, num_rois_per_image, 5))
+    boundary_cls_score_concat = np.reshape(boundary_cls_score_concat,
+                                           newshape=(num_batches, num_rois_per_image, num_keypoints, 4))
+
+    out = np.ones(shape=(num_batches, num_rois_per_image, 22)) * -1
+    # remove background, restore original id
+    out[:, :, 0:1] = cid_concat
+    out[:, :, 1:2] = score_concat
+    out[:, :, 2:6] = rois_concat[:, :, 1:5]
+    out[:, :, 6:22], bb8_confidence = TransformRCNNBB8BoundaryOffset(rois_concat[:, :, 1:5], boundary_cls_score_concat,
+                                                                             boundary_reg_pred_concat, clip,
+                                                                             variances=variance)
+    out = mx.nd.array(out)
+    bb8_confidence = mx.nd.array(bb8_confidence)
+
+    # if the score < positive threshold, reset the id and score to -1
+    out[:, :, 0] = mx.nd.where(condition=out[:, :, 1]<threshold,
+                x=mx.nd.ones_like(out[:, :, 1]) * -1,
+                y=out[:, :, 0])
+    out[:, :, 1] = mx.nd.where(condition=out[:, :, 1] < threshold,
+                               x=mx.nd.ones_like(out[:, :, 1]) * -1,
+                               y=out[:, :, 1])
+
+    valid_count = mx.nd.sum(out[:, :, 0] >= 0, axis=0, keepdims=False, exclude=True)
+    valid_count = valid_count.asnumpy()
+
+    #*******************************************************************************************
+
+    for nbatch in range(num_batches):
+        p_out = out[nbatch, :, :]
+        p_bb8_confidence = bb8_confidence[nbatch, :, :]
+        p_out_ = p_out.asnumpy()
+        p_bb8_confidence_ = p_bb8_confidence.asnumpy()
+
+        if (valid_count[nbatch] < 1) or (nms_threshold <= 0) or (nms_threshold > 1):
+            continue
+
+        # sort and apply NMS
+        nkeep = nms_topk if nms_topk<valid_count[nbatch] else int(valid_count[nbatch])
+        # sort confidence in descend order and re-order output
+        confidence_order_index = p_out[:, 1].topk(k=nkeep)
+        p_out[0:nkeep] = p_out[confidence_order_index]
+        p_bb8_confidence[0:nkeep] = p_bb8_confidence[confidence_order_index]
+        p_out_ = p_out.asnumpy()
+        p_bb8_confidence_ = p_bb8_confidence.asnumpy()
+        # p_out[nkeep:, 0] = -1    # not performed in original mxnet MultiBoxDetection, add by zhangxin
+
+        # apply nms
+        keep_indices = nms(p_out[0:nkeep], nms_threshold, force_suppress, num_classes)
+        keep_indices = np.array(keep_indices)
+        p_out[0:len(keep_indices)] = p_out[keep_indices]
+        p_bb8_confidence[0:len(keep_indices)] = p_bb8_confidence[keep_indices]
+        if len(keep_indices) < p_out.shape[0]:
+            p_out[len(keep_indices):, 0] = -1
+        out[nbatch, :, :] = p_out
+        bb8_confidence[nbatch, :, :] = p_bb8_confidence
+
+    return out, bb8_confidence
+
 
 def RCNNOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat,
                                        rcnn_bb8offset_pred_concat,

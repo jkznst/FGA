@@ -253,6 +253,29 @@ def get_ssd_conv_down(conv_feat):
 
     return conv_fpn_feat, [conv_C7, conv_C6, P5, P4, P3]
 
+def pose_module(conv_feat_stride4, conv_feat_stride8, conv_feat_stride16):
+    bottleneck_stride8 = residual_unit(conv_feat_stride8, num_filter=256, stride=(1,1), dim_match=True,
+                                         name="pose_module_stride8_unit1", bottle_neck=True, dilate=(1, 1), bn_mom=0.9, workspace=256,
+                                         memonger=False)
+    up_stride8 = mx.symbol.UpSampling(bottleneck_stride8, scale=2, sample_type='nearest', workspace=512,
+                                      name='pose_module_stride8_upsampling', num_args=1)
+
+    bottleneck_stride16 = residual_unit(conv_feat_stride16, num_filter=256, stride=(1,1), dim_match=True,
+                                        name="pose_module_stride16_unit1", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                                        workspace=256, memonger=False)
+    bottleneck_stride16 = residual_unit(bottleneck_stride16, num_filter=256, stride=(1, 1), dim_match=True,
+                                        name="pose_module_stride16_unit2", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                                        workspace=256, memonger=False)
+    up_stride16 = mx.symbol.UpSampling(bottleneck_stride16, scale=4, sample_type='nearest', workspace=512,
+                                      name='pose_module_stride16_upsampling', num_args=1)
+
+    conv_feat = mx.symbol.concat(conv_feat_stride4, up_stride8, up_stride16, dim=1, name="pose_module_concat")
+
+    conv_feat = residual_unit(conv_feat, num_filter=256, stride=(1, 1), dim_match=False,
+                              name="pose_module_conv_feat_kp", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                              workspace=256, memonger=False)
+    return conv_feat
+
 
 def get_ssd_md_conv_down(conv_feat):
     conv_C7, conv_C6, conv_C5, conv_C4, conv_C3 = conv_feat
