@@ -1,14 +1,15 @@
 import mxnet as mx
 from symbol.common import multi_layer_feature_SSD, multibox_layer_FPN, multibox_layer_SSD, multibox_layer_FPN_RCNN, multibox_layer_SSD_RCNN
-from operator_py.training_target import *
+# from operator_py.training_target import *
 from operator_py.rpn_proposal import *
-from operator_py.proposal_FGAtarget_cls_softmax_reg_offset import *
-from operator_py.fpn_roi_pooling import *
-from operator_py.proposal_target_bb8offset_reg import *
-from operator_py.proposal_target_maskrcnn_keypoint import *
-from operator_py.proposal_target_heatmap import *
-from operator_py.proposal_target_boundary_offset import *
-from operator_py.weightedCELoss import *
+# from operator_py.proposal_FGAtarget_cls_softmax_reg_offset import *
+# from operator_py.proposal_target_bb8offset_reg import *
+# from operator_py.proposal_target_maskrcnn_keypoint import *
+# from operator_py.proposal_target_heatmap import *
+# from operator_py.proposal_target_boundary_offset import *
+from operator_py.proposal_target_boundary_offset_soft_cls import *
+# from operator_py.weightedCELoss import *
+from operator_py.softCELoss import *
 
 def import_module(module_name):
     """Helper function to import module"""
@@ -1959,7 +1960,7 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
     rpn_targets = mx.contrib.symbol.MultiBoxTarget(
         *[anchor_boxes, label, cls_preds], overlap_threshold=.5, \
         ignore_label=-1, negative_mining_ratio=3, minimum_negative_samples=0, \
-        negative_mining_thresh=.5, variances=(0.1, 0.1, 0.2, 0.2),
+        negative_mining_thresh=.4, variances=(0.1, 0.1, 0.2, 0.2),
         name="multibox_target")
     loc_target = rpn_targets[0]
     loc_target_mask = rpn_targets[1]
@@ -1991,21 +1992,21 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
     #     rpn_proposal_dict.update({'rpn_proposal_stride%s' % s: rpn_det})
 
     # rcnn roi proposal target
-    group = mx.symbol.Custom(rois=rois, gt_boxes=label, op_type='bb8_proposal_target_boundary_offset',
+    group = mx.symbol.Custom(rois=rois, gt_boxes=label, op_type='bb8_proposal_target_boundary_offset_soft_cls',
                          num_keypoints=8, batch_images=4,
                          batch_rois=512, fg_fraction=1.0,
-                         fg_overlap=0.8, bb8_variance=(0.1, 0.1),
+                         fg_overlap=0.5, bb8_variance=(0.1, 0.1),
                          im_info=im_info)
     rois = group[0]
-    boundary_cls_target = group[1]    # (N, 8)
+    boundary_cls_target = group[1]    # (N, 8, 4) for soft cls, (N, 8) for hard cls
     boundary_reg_target = group[2]    # (N, 16)
     boundary_reg_weight = group[3]
 
     # # rcnn roi pool
     # conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'], conv_fpn_feat_dict['stride8'], conv_fpn_feat_dict['stride16'])
     roi_pool = mx.symbol.contrib.ROIAlign(
-        name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
-        spatial_scale=1.0 / 8.)
+        name='roi_pool', data=conv_fpn_feat_dict['stride4'], rois=rois, pooled_size=(7, 7),
+        spatial_scale=1.0 / 4.)
     
     # roi_pool = mx.symbol.Custom(op_type="fpn_roi_pool",
     #                             rcnn_strides="(16,8,4)",
@@ -2040,8 +2041,9 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
     rcnn_bb8boundary_reg_pred = mx.symbol.FullyConnected(data=relu7, weight=reg_pred_weight, bias=reg_pred_bias,
                                                        num_hidden=8 * 4 * 2, name="rcnn_bb8boundary_reg_pred")
 
-    # # FGA cls loss
-    # rcnn_bb8boundary_cls_prob = mx.symbol.SoftmaxOutput(data=rcnn_bb8boundary_cls_score.reshape((0,8,-1)), label=boundary_cls_target, \
+    # # cls loss
+    # rcnn_bb8boundary_cls_prob = mx.symbol.SoftmaxOutput(data=rcnn_bb8boundary_cls_score.reshape((0,8,-1)),
+    #                                                     label=boundary_cls_target, \
     #     ignore_label=-1, use_ignore=True, grad_scale=alpha_bb8, preserve_shape=True, \
     #     normalization='valid', name="rcnn_bb8boundary_cls_prob")
     rcnn_bb8boundary_reg_loss_ = mx.symbol.smooth_l1(name="rcnn_bb8boundary_reg_loss_",
@@ -2049,15 +2051,15 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
                                                              rcnn_bb8boundary_reg_pred - boundary_reg_target),
                                                      scalar=1.0)
     rcnn_bb8boundary_cls_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_cls_score.reshape((0, 8, -1)), label=boundary_cls_target,
-                                                 reg_smoothl1=rcnn_bb8boundary_reg_loss_, op_type="weightedcrossentropyloss",
-                                                 ignore_label=-1, normalization='valid', grad_scale=10.0)
-    # FGA offset reg loss
-    no_grad_cls_prob = mx.symbol.pick(rcnn_bb8boundary_cls_prob, boundary_cls_target, axis=-1, keepdims=True)    # shape (N, 8, 1)
-    no_grad_cls_prob = mx.symbol.pow(no_grad_cls_prob, 2)
-    no_grad_cls_prob = mx.symbol.broadcast_div(no_grad_cls_prob, mx.symbol.max(no_grad_cls_prob))
-    no_grad_cls_prob = mx.symbol.BlockGrad(1.1 * no_grad_cls_prob)
-    rcnn_bb8boundary_reg_loss_ = mx.symbol.reshape(rcnn_bb8boundary_reg_loss_, shape=(0, 8, -1))
-    rcnn_bb8boundary_reg_loss_ = mx.symbol.broadcast_mul(rcnn_bb8boundary_reg_loss_, no_grad_cls_prob)
+                                                 op_type="softcrossentropyloss",
+                                                 ignore_label=-1, normalization='valid', grad_scale=alpha_bb8)
+    # offset reg loss
+    # no_grad_cls_prob = mx.symbol.pick(rcnn_bb8boundary_cls_prob, boundary_cls_target, axis=-1, keepdims=True)    # shape (N, 8, 1)
+    # no_grad_cls_prob = mx.symbol.pow(no_grad_cls_prob, 2)
+    # no_grad_cls_prob = mx.symbol.broadcast_div(no_grad_cls_prob, mx.symbol.max(no_grad_cls_prob))
+    # no_grad_cls_prob = mx.symbol.BlockGrad(1.1 * no_grad_cls_prob)
+    # rcnn_bb8boundary_reg_loss_ = mx.symbol.reshape(rcnn_bb8boundary_reg_loss_, shape=(0, 8, -1))
+    # rcnn_bb8boundary_reg_loss_ = mx.symbol.broadcast_mul(rcnn_bb8boundary_reg_loss_, no_grad_cls_prob)
     rcnn_bb8boundary_reg_loss = mx.symbol.MakeLoss(rcnn_bb8boundary_reg_loss_, grad_scale=alpha_bb8, \
                                                  normalization='valid', name="rcnn_bb8boundary_reg_loss")
 
@@ -2197,8 +2199,8 @@ def get_RCNN_boundary_offset_resnetm_fpn_test(num_classes, num_layers, num_filte
     # conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'], conv_fpn_feat_dict['stride8'],
     #                            conv_fpn_feat_dict['stride16'])
     roi_pool = mx.symbol.contrib.ROIAlign(
-        name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
-        spatial_scale=1.0 / 8.)
+        name='roi_pool', data=conv_fpn_feat_dict['stride4'], rois=rois, pooled_size=(7, 7),
+        spatial_scale=1.0 / 4.)
 
     # bb8 boundary cls + regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8boundary_flatten")

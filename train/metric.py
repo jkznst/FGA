@@ -398,7 +398,7 @@ class MultiBoxMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         # rpn_cid = preds[7].asnumpy()
 
         # rcnn boundary loss count
-        rcnn_boundary_cls_target = preds[8].asnumpy()    # shape (N_rois, num_keypoints)
+        rcnn_boundary_cls_target = preds[8].asnumpy()    # shape (N_rois, num_keypoints, 4)
         rcnn_boundary_reg_target = preds[9].asnumpy()    # shape (N_rois, 2*num_keypoints*4)
         rcnn_boundary_cls_prob = preds[10].asnumpy()     # shape (N_rois, num_keypoints, 4)
         rcnn_boundary_reg_loss = preds[11].asnumpy()
@@ -409,13 +409,13 @@ class MultiBoxMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
 
 
         # softmax version loss update
-        rcnn_valid_count = np.sum(rcnn_boundary_cls_target >= 0)
-        rcnn_boundary_cls_target = rcnn_boundary_cls_target.flatten()
-        rcnn_mask = np.where(rcnn_boundary_cls_target >= 0)[0]
-        rcnn_indices = np.int64(rcnn_boundary_cls_target[rcnn_mask])
+        rcnn_valid_count = np.sum(rcnn_boundary_cls_target >= 0) / rcnn_boundary_cls_target.shape[2]
+        rcnn_boundary_cls_target = rcnn_boundary_cls_target.reshape((-1, rcnn_boundary_cls_target.shape[2]))
+        rcnn_mask = np.where(np.sum(rcnn_boundary_cls_target, axis=1) >= 0)[0]
+        rcnn_indices = np.int64(np.argmax(rcnn_boundary_cls_target[rcnn_mask], axis=1))
         rcnn_prob = rcnn_boundary_cls_prob.reshape((-1, rcnn_boundary_cls_prob.shape[2]))
-        rcnn_prob = rcnn_prob[rcnn_mask, rcnn_indices]
-        self.sum_metric[2] += (-np.log(rcnn_prob +self.eps)).sum()
+        rcnn_prob = rcnn_prob[rcnn_mask]
+        self.sum_metric[2] += (-rcnn_boundary_cls_target[rcnn_mask] * np.log(rcnn_prob +self.eps)).sum()
         self.num_inst[2] += rcnn_valid_count
 
         max_pred_prob_indices = np.argmax(rcnn_boundary_cls_prob.reshape((-1, rcnn_boundary_cls_prob.shape[2])), axis=-1)
