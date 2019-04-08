@@ -1660,13 +1660,19 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
             values = [x / y if y != 0 else float('nan') \
                 for x, y in zip(self.sum_metric[:self.num], self.num_inst[:self.num])]
 
-            for i, cls in enumerate(self.classes):
-                for pose_metric in self.pose_metrics:
+            for pose_metric in self.pose_metrics:
+                avg_value = 0.0
+                for i, cls in enumerate(self.classes):
                     names += ['{}_{}'.format(cls, pose_metric)]
                     if i in getattr(self, pose_metric):
                         values += [getattr(self, pose_metric)[i] / self.counts[i]]
+                        avg_value += getattr(self, pose_metric)[i] / self.counts[i]
                     else:
                         values += [0]
+
+                names += ["avg_{}".format(pose_metric)]
+                avg_value /= len(self.classes)
+                values += [avg_value]
 
             return (names, values)
 
