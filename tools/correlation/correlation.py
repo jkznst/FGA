@@ -24,10 +24,22 @@ for cid, cls_probs in boundary_cls_probs_dict.items():
 powered_cls_prob = np.power(boundary_cls_probs,4)
 mean_cls_prob = np.mean(powered_cls_prob)
 
+
 boundary_reg_errors = np.reshape(boundary_reg_errors, newshape=(-1, 2)) / 300. * 512.
 boundary_reg_errors_x = boundary_reg_errors[:, 0]
 boundary_reg_errors_y = boundary_reg_errors[:, 1]
 boundary_reg_distance = np.sqrt(np.square(boundary_reg_errors_x) + np.square(boundary_reg_errors_y))
+
+mean_distance = np.mean(boundary_reg_distance)
+median_distance = np.median(boundary_reg_distance)
+
+
+plt.hist(np.clip(boundary_reg_distance, a_max=100, a_min=0), bins=60, normed=0, facecolor="blue", edgecolor="black", alpha=0.7)
+plt.title("Regression Distance", fontsize=18)
+plt.xlabel("regression error", fontsize=9)
+plt.ylabel("frequency", fontsize=9)
+plt.savefig("./reg_distance.jpg", dpi=1000)
+plt.show()
 
 corrcoef = np.corrcoef(boundary_reg_distance, boundary_cls_probs)
 
