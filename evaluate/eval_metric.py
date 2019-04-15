@@ -1592,6 +1592,7 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         return out
 
     def calculate6Dpose(self, instance_bb8det=None, model_id=None, bb8confidence=None):
+        import cv2
         model_objx_info = self.models_info[model_id]
 
         min_x = model_objx_info['min_x'] * self.scale_to_meters
@@ -1614,6 +1615,8 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         BoundingBox[5, :] = np.array([max_x, min_y, max_z])
         BoundingBox[6, :] = np.array([max_x, max_y, max_z])
         BoundingBox[7, :] = np.array([max_x, max_y, min_z])
+
+        # my epnp method
         Xworld = np.reshape(BoundingBox, newshape=(-1, 3, 1))
 
         Ximg_pix = instance_bb8det
@@ -1636,6 +1639,20 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         error, Rt, Cc, Xc = epnpSolver.efficient_pnp_gauss(Xworld, Ximg_pix, self.cam_intrinsic)
         out = {"R": Rt[0:3, 0:3],
         "t": Rt[0:3, 3:4]}
+
+        # opencv epnp method todo: test
+        # Xworld = np.expand_dims(BoundingBox, 0)
+        # Ximg_pix = np.expand_dims(Ximg_pix, 0)
+        # Xworld = np.ascontiguousarray(Xworld.astype(np.float64))
+        # Ximg_pix = np.ascontiguousarray(Ximg_pix.astype(np.float64))
+        # _ret, Rvec, tvec = cv2.solvePnP(Xworld,
+        #                                 Ximg_pix,
+        #                                 self.cam_intrinsic[0:3, 0:3],
+        #                                 distCoeffs=np.zeros([8, 1], dtype="float64"),
+        #                                 flags=cv2.SOLVEPNP_EPNP)
+        # R, _ = cv2.Rodrigues(Rvec)
+        # out = {"R": R,
+        #        "t": tvec}
 
         return out
 
