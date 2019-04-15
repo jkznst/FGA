@@ -1994,7 +1994,7 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
     # rcnn roi proposal target
     group = mx.symbol.Custom(rois=rois, gt_boxes=label, op_type='bb8_proposal_target_boundary_offset_soft_cls',
                          num_keypoints=8, batch_images=4,
-                         batch_rois=512, fg_fraction=1.0,
+                         batch_rois=1024, fg_fraction=1.0,
                          fg_overlap=0.5, bb8_variance=(0.1, 0.1),
                          im_info=im_info)
     rois = group[0]
@@ -2164,7 +2164,6 @@ def get_RCNN_boundary_offset_resnetm_fpn_test(num_classes, num_layers, num_filte
     """
     from symbol.resnetm import get_ssd_conv, get_ssd_conv_down, pose_module
     data = mx.symbol.Variable('data')
-    label = mx.sym.Variable('label')
 
     # shared convolutional layers, bottom up
     conv_feat = get_ssd_conv(data, num_layers)
@@ -2186,7 +2185,7 @@ def get_RCNN_boundary_offset_resnetm_fpn_test(num_classes, num_layers, num_filte
 
     # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
     rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
-        name="rpn_proposal", nms_threshold=0.45, force_suppress=False,
+        name="rpn_proposal", nms_threshold=0.7, force_suppress=False,
         variances=(0.1, 0.1, 0.2, 0.2), nms_topk=400)
 
     # # select foreground region proposals, and transform the coordinate from [0,1] to [0, 448]
