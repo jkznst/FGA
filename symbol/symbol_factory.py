@@ -287,7 +287,7 @@ def get_symbol_train(network, mode, data_shape, alpha_bb8, **kwargs):
     config.update(kwargs)
     networks = {
         'vgg16': symbol_builder.get_vgg_reduced_fpn_train,
-        'resnet50': symbol_builder.get_resnet_fpn_train,
+        # 'resnet50': getattr(symbol_builder, 'get_{}_resnet_fpn_train'.format(mode)),
         'resnet50d': symbol_builder.get_resnetd_fpn_train,
         'resnet50deeplabv2': symbol_builder.get_resnetdeeplabv2_fpn_train,
         'resnet50m':getattr(symbol_builder, 'get_{}_resnetm_fpn_train'.format(mode)),
@@ -319,7 +319,7 @@ def get_symbol(network, mode, data_shape, **kwargs):
     config.update(kwargs)
     networks = {
         # 'vgg16': symbol_builder.get_vgg_reduced_fpn_test,
-        # 'resnet50': symbol_builder.get_resnet_fpn_test,
+        # 'resnet50': getattr(symbol_builder, 'get_{}_resnet_fpn_test'.format(mode)),
         # 'resnet50d': symbol_builder.get_resnetd_fpn_test,
         # 'resnet50deeplabv2': symbol_builder.get_resnetdeeplabv2_fpn_test,
         'resnet50m': getattr(symbol_builder, 'get_{}_resnetm_fpn_test'.format(mode)),

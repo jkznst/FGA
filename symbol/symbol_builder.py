@@ -1,15 +1,15 @@
 import mxnet as mx
 from symbol.common import multi_layer_feature_SSD, multibox_layer_FPN, multibox_layer_SSD, multibox_layer_FPN_RCNN, multibox_layer_SSD_RCNN
 # from operator_py.training_target import *
-from operator_py.rpn_proposal import *
+from operator_py.rpn_proposal import rpnProposalOperator
 # from operator_py.proposal_FGAtarget_cls_softmax_reg_offset import *
-# from operator_py.proposal_target_bb8offset_reg import *
+# from operator_py.proposal_target_bb8offset_reg import BB8ProposalTargetOperator
 # from operator_py.proposal_target_maskrcnn_keypoint import *
 # from operator_py.proposal_target_heatmap import *
-# from operator_py.proposal_target_boundary_offset import *
-from operator_py.proposal_target_boundary_offset_soft_cls import *
+# from operator_py.proposal_target_boundary_offset import BB8ProposalTargetOperator
+from operator_py.proposal_target_boundary_offset_soft_cls import BB8ProposalTargetOperator
 # from operator_py.weightedCELoss import *
-from operator_py.softCELoss import *
+from operator_py.softCELoss import SoftCELossOperator
 
 def import_module(module_name):
     """Helper function to import module"""
@@ -2050,7 +2050,9 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
                                                      data=boundary_reg_weight * (
                                                              rcnn_bb8boundary_reg_pred - boundary_reg_target),
                                                      scalar=1.0)
-    rcnn_bb8boundary_cls_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_cls_score.reshape((0, 8, -1)), label=boundary_cls_target,
+    rcnn_bb8boundary_cls_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_cls_score.reshape((0, 8, -1)),
+                                                 cls_target=boundary_cls_target,
+                                                 name="rcnn_bb8boundary_cls_loss",
                                                  op_type="softcrossentropyloss",
                                                  ignore_label=-1, normalization='valid', grad_scale=alpha_bb8)
     # offset reg loss
@@ -2476,6 +2478,327 @@ def get_resnetmd_fpn_train(num_classes, alpha_bb8, num_layers, num_filters,
     out = mx.symbol.Group([cls_prob, loc_loss, cls_label, bb8_loss, loc_pred, bb8_pred,
                            anchors, loc_label, loc_pred_masked, loc_mae, bb8_label, bb8_pred_masked, bb8_mae])
     return out
+
+
+def get_RCNN_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers, num_filters,
+                     sizes, ratios, normalizations=-1, steps=[], im_info=(), **kwargs):
+    """Build network symbol for training FPN
+
+    Parameters
+    ----------
+    network : str
+        base network symbol name
+    num_classes : int
+        number of object classes not including background
+    from_layers : list of str
+        feature extraction layers, use '' for add extra layers
+        For example:
+        from_layers = ['relu4_3', 'fc7', '', '', '', '']
+        which means extract feature from relu4_3 and fc7, adding 4 extra layers
+        on top of fc7
+    num_filters : list of int
+        number of filters for extra layers, you can use -1 for extracted features,
+        however, if normalization and scale is applied, the number of filter for
+        that layer must be provided.
+        For example:
+        num_filters = [512, -1, 512, 256, 256, 256]
+    strides : list of int
+        strides for the 3x3 convolution appended, -1 can be used for extracted
+        feature layers
+    pads : list of int
+        paddings for the 3x3 convolution, -1 can be used for extracted layers
+    sizes : list or list of list
+        [min_size, max_size] for all layers or [[], [], []...] for specific layers
+    ratios : list or list of list
+        [ratio1, ratio2...] for all layers or [[], [], ...] for specific layers
+    normalizations : int or list of int
+        use normalizations value for all layers or [...] for specific layers,
+        -1 indicate no normalizations and scales
+    steps : list
+        specify steps for each MultiBoxPrior layer, leave empty, it will calculate
+        according to layer dimensions
+    min_filter : int
+        minimum number of filters used in 1x1 convolution
+    nms_thresh : float
+        non-maximum suppression threshold
+    force_suppress : boolean
+        whether suppress different class objects
+    nms_topk : int
+        apply NMS to top K detections
+    minimum_negative_samples : int
+        always have some negative examples, no matter how many positive there are.
+        this is useful when training on images with no ground-truth.
+    Returns
+    -------
+    mx.Symbol
+
+    """
+    from symbol.resnet import get_ssd_conv, get_ssd_conv_down
+    data = mx.symbol.Variable('data')
+    label = mx.sym.Variable('label')
+
+    # shared convolutional layers, bottom up
+    conv_feat = get_ssd_conv(data, num_layers)
+
+    # shared convolutional layers, top down
+    conv_fpn_feat_dict, conv_fpn_feat = get_ssd_conv_down(conv_feat)
+    conv_fpn_feat.reverse()     # [P3, P4, P5, P6, P7]
+
+    # rpn_bbox_pred : (N, 4 x num_anchors, H, W)
+    # rpn_cls_pred : (N, num_anchor x (num_classes + 1), H, W)
+    # rpn_anchor: (N, num_all_anchor, 4)
+    rpn_bbox_pred_dict, rpn_cls_prob_dict, rpn_anchor_dict, \
+    loc_preds, cls_preds, anchor_boxes = multibox_layer_FPN_RCNN(conv_fpn_feat, \
+        num_classes, sizes=sizes, ratios=ratios, normalization=normalizations, \
+        num_channels=num_filters, clip=False, interm_layer=0, steps=steps)
+
+    # now cls_preds are in shape of  batchsize x num_class x num_anchors
+
+    rpn_targets = mx.contrib.symbol.MultiBoxTarget(
+        *[anchor_boxes, label, cls_preds], overlap_threshold=.5, \
+        ignore_label=-1, negative_mining_ratio=3, minimum_negative_samples=0, \
+        negative_mining_thresh=.5, variances=(0.1, 0.1, 0.2, 0.2),
+        name="multibox_target")
+    loc_target = rpn_targets[0]
+    loc_target_mask = rpn_targets[1]
+    cls_target = rpn_targets[2]
+
+    cls_prob = mx.symbol.SoftmaxOutput(data=cls_preds, label=cls_target, \
+        ignore_label=-1, use_ignore=True, grad_scale=1.0, multi_output=True, \
+        normalization='valid', name="cls_prob")
+    loc_loss_ = mx.symbol.smooth_l1(name="loc_loss_", \
+        data=loc_target_mask * (loc_preds - loc_target), scalar=1.0)
+    loc_loss = mx.symbol.MakeLoss(loc_loss_, grad_scale=1.0, \
+        normalization='valid', name="loc_loss")
+
+    # rpn proposal
+    # im_info = (512, 512, 1)    # (H, W, scale)
+    # rpn_feat_stride = [4, 8, 16, 32, 64]
+    # granularity = (56, 56)
+
+    # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
+    rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
+        name="rpn_proposal", nms_threshold=0.7, force_suppress=False,
+        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=400)
+
+    # # select foreground region proposals, and transform the coordinate from [0,1] to [0, 448]
+    rois, score, cid = mx.symbol.Custom(op_type='rpn_proposal',
+                     rpn_det=rpn_det,
+                     output_score=True,
+                     rpn_post_nms_top_n=400, im_info=im_info
+                     )
+    rois = mx.symbol.reshape(rois, shape=(-1, 5))
+    # rois = mx.symbol.MakeLoss(data=rois, grad_scale=0, name='rpn_roi')
+    # score = mx.symbol.MakeLoss(data=score, grad_scale=0, name='rpn_score')
+    # cid = mx.symbol.MakeLoss(data=cid, grad_scale=0, name='rpn_cid')
+    #     rpn_proposal_dict.update({'rpn_proposal_stride%s' % s: rpn_det})
+
+    # rcnn roi proposal target
+    group = mx.symbol.Custom(rois=rois, gt_boxes=label, op_type='bb8_proposal_target_offset_reg',
+                         num_keypoints=8, batch_images=4,
+                         batch_rois=512, fg_fraction=1.0,
+                         fg_overlap=0.5, bb8_variance=(0.1, 0.1),
+                         im_info=im_info)
+    rois = group[0]
+    rcnn_bb8offset_reg_target = group[1]
+    rcnn_bb8offset_reg_weight = group[2]
+
+    # # rcnn roi pool
+    roi_pool = mx.symbol.contrib.ROIAlign(
+        name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
+        spatial_scale=1.0 / 8.)
+    # roi_pool = mx.symbol.Custom(op_type="fpn_roi_pool",
+    #                             rcnn_strides="(16,8,4)",
+    #                             pool_h=7, pool_w=7,
+    #                             feat_stride16=conv_fpn_feat_dict['stride16'],
+    #                             feat_stride8=conv_fpn_feat_dict['stride8'],
+    #                             feat_stride4=conv_fpn_feat_dict['stride4'],
+    #                             rois=rois)
+    # roi_pool = mx.symbol.MakeLoss(data=roi_pool, grad_scale=0., name='roi_pool')
+
+    # # bb8 offset regression head
+    flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8offset_reg_flatten")
+    fc6_weight = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc6_weight", init=mx.init.Xavier())
+    fc6_bias = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc6_bias", init=mx.init.Constant(0.0))
+    fc6 = mx.symbol.FullyConnected(data=flatten, weight=fc6_weight, bias=fc6_bias, num_hidden=1024, name="rcnn_bb8offset_reg_fc6")
+    relu6 = mx.symbol.Activation(data=fc6, act_type="relu", name="rcnn_bb8offset_reg_relu6")
+    fc7_weight = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc7_weight", init=mx.init.Xavier())
+    fc7_bias = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc7_bias", init=mx.init.Constant(0.0))
+    fc7 = mx.symbol.FullyConnected(data=relu6, weight=fc7_weight, bias=fc7_bias, num_hidden=1024, name="rcnn_bb8offset_reg_fc7")
+    relu7 = mx.symbol.Activation(data=fc7, act_type="relu", name="rcnn_bb8offset_reg_relu7")
+
+    pred_weight = mx.symbol.Variable(name="rcnn_bb8offset_reg_pred_weight", init=mx.init.Normal(sigma=0.001))
+    pred_bias = mx.symbol.Variable(name="rcnn_bb8offset_reg_pred_bias", init=mx.init.Constant(0.0))
+    rcnn_bb8offset_reg_pred = mx.symbol.FullyConnected(data=relu7, weight=pred_weight, bias=pred_bias,
+                                                   num_hidden=16, name="rcnn_bb8offset_reg_pred")
+
+    # keypoint offset loss
+    rcnn_bb8offset_reg_loss_ = mx.symbol.smooth_l1(name="rcnn_bb8offset_reg_loss_", \
+                                    data=rcnn_bb8offset_reg_weight * (rcnn_bb8offset_reg_pred - rcnn_bb8offset_reg_target), scalar=1.0)
+    rcnn_bb8offset_reg_loss = mx.symbol.MakeLoss(rcnn_bb8offset_reg_loss_, grad_scale=alpha_bb8, \
+                                  normalization='valid', name="rcnn_bb8offset_reg_loss")
+
+
+    # monitoring training status
+    cls_label = mx.symbol.MakeLoss(data=cls_target, grad_scale=0, name="cls_label")
+    rpn_loc_target = mx.symbol.MakeLoss(data=loc_target * loc_target_mask, grad_scale=0, name="rpn_loc_target")
+    det_out = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
+                                                  name="rpn_det_out", nms_threshold=0.45, force_suppress=False,
+                                                  variances=(0.1, 0.1, 0.2, 0.2), nms_topk=400)
+    det = mx.symbol.MakeLoss(data=det_out, grad_scale=0, name="det_out")
+    # roi_pool = mx.symbol.MakeLoss(data=roi_pool, grad_scale=0., name="roi_pool_monitor")
+
+    rois = mx.symbol.MakeLoss(data=rois, grad_scale=0, name="rois")
+    score = mx.symbol.MakeLoss(data=score, grad_scale=0, name="score")
+    cid = mx.symbol.MakeLoss(data=cid, grad_scale=0, name="cid")
+    #
+    rcnn_bb8offset_reg_target_monitor = mx.symbol.MakeLoss(data=rcnn_bb8offset_reg_weight * rcnn_bb8offset_reg_target, grad_scale=0,
+                                             name="rcnn_bb8offset_reg_target_monitor")
+
+    out = mx.symbol.Group([cls_prob, loc_loss, cls_label, rpn_loc_target, det,
+                           rois, score, cid,
+                           rcnn_bb8offset_reg_target_monitor, rcnn_bb8offset_reg_loss
+                           ])
+    return out
+
+def get_RCNN_offset_resnet_fpn_test(num_classes, num_layers, num_filters,
+                     sizes, ratios, normalizations=-1, steps=[], im_info=(), **kwargs):
+    """Build network symbol for training FPN
+
+    Parameters
+    ----------
+    network : str
+        base network symbol name
+    num_classes : int
+        number of object classes not including background
+    from_layers : list of str
+        feature extraction layers, use '' for add extra layers
+        For example:
+        from_layers = ['relu4_3', 'fc7', '', '', '', '']
+        which means extract feature from relu4_3 and fc7, adding 4 extra layers
+        on top of fc7
+    num_filters : list of int
+        number of filters for extra layers, you can use -1 for extracted features,
+        however, if normalization and scale is applied, the number of filter for
+        that layer must be provided.
+        For example:
+        num_filters = [512, -1, 512, 256, 256, 256]
+    strides : list of int
+        strides for the 3x3 convolution appended, -1 can be used for extracted
+        feature layers
+    pads : list of int
+        paddings for the 3x3 convolution, -1 can be used for extracted layers
+    sizes : list or list of list
+        [min_size, max_size] for all layers or [[], [], []...] for specific layers
+    ratios : list or list of list
+        [ratio1, ratio2...] for all layers or [[], [], ...] for specific layers
+    normalizations : int or list of int
+        use normalizations value for all layers or [...] for specific layers,
+        -1 indicate no normalizations and scales
+    steps : list
+        specify steps for each MultiBoxPrior layer, leave empty, it will calculate
+        according to layer dimensions
+    min_filter : int
+        minimum number of filters used in 1x1 convolution
+    nms_thresh : float
+        non-maximum suppression threshold
+    force_suppress : boolean
+        whether suppress different class objects
+    nms_topk : int
+        apply NMS to top K detections
+    minimum_negative_samples : int
+        always have some negative examples, no matter how many positive there are.
+        this is useful when training on images with no ground-truth.
+    Returns
+    -------
+    mx.Symbol
+
+    """
+    from symbol.resnet import get_ssd_conv, get_ssd_conv_down
+    data = mx.symbol.Variable('data')
+    label = mx.sym.Variable('label')
+
+    # shared convolutional layers, bottom up
+    conv_feat = get_ssd_conv(data, num_layers)
+
+    # shared convolutional layers, top down
+    conv_fpn_feat_dict, conv_fpn_feat = get_ssd_conv_down(conv_feat)
+    conv_fpn_feat.reverse()     # [P3, P4, P5, P6, P7]
+
+    # rpn_bbox_pred : (N, 4 x num_anchors, H, W)
+    # rpn_cls_pred : (N, num_anchor x (num_classes + 1), H, W)
+    # rpn_anchor: (N, num_all_anchor, 4)
+    rpn_bbox_pred_dict, rpn_cls_prob_dict, rpn_anchor_dict, \
+    loc_preds, cls_preds, anchor_boxes = multibox_layer_FPN_RCNN(conv_fpn_feat, \
+        num_classes, sizes=sizes, ratios=ratios, normalization=normalizations, \
+        num_channels=num_filters, clip=False, interm_layer=0, steps=steps)
+
+    # now cls_preds are in shape of  batchsize x num_class x num_anchors
+
+    cls_prob = mx.symbol.softmax(data=cls_preds, axis=1, name="rpn_cls_prob")
+
+    # rpn proposal
+    # im_info = (512, 512, 1)    # (H, W, scale)
+    # rpn_feat_stride = [4, 8, 16, 32, 64]
+
+    # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
+    rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
+        name="rpn_proposal", nms_threshold=0.45, force_suppress=False,
+        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=400)
+
+    # # select foreground region proposals, and transform the coordinate from [0,1] to [0, 448]
+    rois, score, cid = mx.symbol.Custom(op_type='rpn_proposal',
+                     rpn_det=rpn_det,
+                     output_score=True,
+                     rpn_post_nms_top_n=400, im_info=im_info
+                     )
+    rois = mx.symbol.reshape(rois, shape=(-1, 5))
+
+    # # rcnn roi pool
+    roi_pool = mx.symbol.contrib.ROIAlign(
+        name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
+        spatial_scale=1.0 / 8.)
+    # roi_pool = mx.symbol.Custom(op_type="fpn_roi_pool",
+    #                             rcnn_strides="(16,8,4)",
+    #                             pool_h=7, pool_w=7,
+    #                             feat_stride16=conv_fpn_feat_dict['stride16'],
+    #                             feat_stride8=conv_fpn_feat_dict['stride8'],
+    #                             feat_stride4=conv_fpn_feat_dict['stride4'],
+    #                             rois=rois)
+    # roi_pool = mx.symbol.MakeLoss(data=roi_pool, grad_scale=0., name='roi_pool')
+
+    # # bb8 offset regression head
+    flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8offset_reg_flatten")
+    fc6_weight = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc6_weight", init=mx.init.Xavier())
+    fc6_bias = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc6_bias", init=mx.init.Constant(0.0))
+    fc6 = mx.symbol.FullyConnected(data=flatten, weight=fc6_weight, bias=fc6_bias, num_hidden=1024, name="rcnn_bb8offset_reg_fc6")
+    relu6 = mx.symbol.Activation(data=fc6, act_type="relu", name="rcnn_bb8offset_reg_relu6")
+    fc7_weight = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc7_weight", init=mx.init.Xavier())
+    fc7_bias = mx.symbol.Variable(name="rcnn_bb8offset_reg_fc7_bias", init=mx.init.Constant(0.0))
+    fc7 = mx.symbol.FullyConnected(data=relu6, weight=fc7_weight, bias=fc7_bias, num_hidden=1024, name="rcnn_bb8offset_reg_fc7")
+    relu7 = mx.symbol.Activation(data=fc7, act_type="relu", name="rcnn_bb8offset_reg_relu7")
+
+    pred_weight = mx.symbol.Variable(name="rcnn_bb8offset_reg_pred_weight", init=mx.init.Normal(sigma=0.001))
+    pred_bias = mx.symbol.Variable(name="rcnn_bb8offset_reg_pred_bias", init=mx.init.Constant(0.0))
+    rcnn_bb8offset_reg_pred = mx.symbol.FullyConnected(data=relu7, weight=pred_weight, bias=pred_bias,
+                                                   num_hidden=16, name="rcnn_bb8offset_reg_pred")
+
+
+    # monitoring training status
+    # det = mx.symbol.MakeLoss(data=rpn_det, grad_scale=0, name="det_out")
+    # roi_pool = mx.symbol.MakeLoss(data=roi_pool, grad_scale=0., name="roi_pool_monitor")
+
+    rois = mx.symbol.MakeLoss(data=rois, grad_scale=0, name="rois")
+    score = mx.symbol.MakeLoss(data=score, grad_scale=0, name="score")
+    cid = mx.symbol.MakeLoss(data=cid, grad_scale=0, name="cid")
+    #
+    rcnn_bb8offset_reg_pred_out = mx.symbol.MakeLoss(data=rcnn_bb8offset_reg_pred, grad_scale=0,
+                                             name="rcnn_bb8offset_reg_pred_out")
+
+    out = mx.symbol.Group([rois, score, cid,
+                           rcnn_bb8offset_reg_pred_out])
+    return out
+
 
 
 def get_vgg_reduced_fpn_train(num_classes, alpha_bb8, num_layers, num_filters,
