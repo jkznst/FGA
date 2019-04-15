@@ -1,4 +1,4 @@
-import numpy as np
+# import numpy as np
 import mxnet as mx
 
 class SoftCELossOperator(mx.operator.CustomOp):
@@ -6,9 +6,9 @@ class SoftCELossOperator(mx.operator.CustomOp):
     '''
     def __init__(self, ignore_label, normalization, grad_scale):
         super(SoftCELossOperator, self).__init__()
-        self._ignore_label = np.int(ignore_label)
+        self._ignore_label = int(ignore_label)
         self._normalization = normalization
-        self._grad_scale = np.float(grad_scale)
+        self._grad_scale = float(grad_scale)
         self.eps = 1e-14
 
         # print(self._ignore_label)
@@ -19,7 +19,7 @@ class SoftCELossOperator(mx.operator.CustomOp):
         cls_score = in_data[0]
         y = mx.nd.softmax(cls_score, axis=-1)
         self._prob = y
-        self._cls_target = in_data[1].astype("float32")
+        # self._cls_target = in_data[1].astype("float32")
         # print("max_cls_target_in_loss:", self._cls_target.max().asscalar(), "min_cls_target_in_loss:",
         #       self._cls_target.min().asscalar())
 
@@ -31,7 +31,9 @@ class SoftCELossOperator(mx.operator.CustomOp):
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
         cls_prob = self._prob    # shape (N, 8, 4)
-        cls_target = self._cls_target        # shape (N, 8, 4)
+        cls_target = in_data[1].astype("float32")        # shape (N, 8, 4)
+
+        assert (mx.nd.max(cls_target) <= 1.0 and mx.nd.min(cls_target) >= -1.0), "cls_target out of range!!"
 
         # print("max_cls_target_in_loss:", cls_target.max().asscalar(), "min_cls_target_in_loss:", cls_target.min().asscalar())
 
@@ -62,11 +64,13 @@ class SoftCELossOperator(mx.operator.CustomOp):
         if self._grad_scale is not None:
             d_cls_score *= self._grad_scale
 
-        if (mx.nd.max(cls_target) <= 1.0 and mx.nd.min(cls_target) >= -1.0):
-            self.assign(in_grad[0], req[0], d_cls_score)
-        else:
-            print("Due to custom operator error, cls_target out of range!!")
-            self.assign(in_grad[0], req[0], 0)
+        # if (mx.nd.max(cls_target) <= 1.0 and mx.nd.min(cls_target) >= -1.0):
+        #     self.assign(in_grad[0], req[0], d_cls_score)
+        # else:
+        #     print("Due to custom operator error, cls_target out of range!!")
+        #     print(cls_target[0:10])
+        #     self.assign(in_grad[0], req[0], 0)
+        self.assign(in_grad[0], req[0], d_cls_score)
         self.assign(in_grad[1], req[1], 0)
 
 @mx.operator.register("softcrossentropyloss")
@@ -82,7 +86,7 @@ class SoftCELossProp(mx.operator.CustomOpProp):
         # print(self._grad_scale)
 
     def list_arguments(self):
-        return ['cls_score', 'label']
+        return ['cls_score', 'cls_target']
 
     def list_outputs(self):
         return ['cls_prob']
@@ -98,5 +102,5 @@ class SoftCELossProp(mx.operator.CustomOpProp):
     def create_operator(self, ctx, in_shapes, in_dtypes):
         return SoftCELossOperator(self._ignore_label, self._normalization, self._grad_scale)
 
-    def declare_backward_dependency(self, out_grad, in_data, out_data):
-        return []
+    # def declare_backward_dependency(self, out_grad, in_data, out_data):
+    #     return []
