@@ -2533,6 +2533,7 @@ def get_RCNN_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers, num_fil
 
     """
     from symbol.resnet import get_ssd_conv, get_ssd_conv_down
+
     data = mx.symbol.Variable('data')
     label = mx.sym.Variable('label')
 
@@ -2556,7 +2557,7 @@ def get_RCNN_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers, num_fil
     rpn_targets = mx.contrib.symbol.MultiBoxTarget(
         *[anchor_boxes, label, cls_preds], overlap_threshold=.5, \
         ignore_label=-1, negative_mining_ratio=3, minimum_negative_samples=0, \
-        negative_mining_thresh=.5, variances=(0.1, 0.1, 0.2, 0.2),
+        negative_mining_thresh=.4, variances=(0.1, 0.1, 0.2, 0.2),
         name="multibox_target")
     loc_target = rpn_targets[0]
     loc_target_mask = rpn_targets[1]
@@ -2578,13 +2579,13 @@ def get_RCNN_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers, num_fil
     # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
     rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
         name="rpn_proposal", nms_threshold=0.7, force_suppress=False,
-        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=400)
+        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=2000)
 
     # # select foreground region proposals, and transform the coordinate from [0,1] to [0, 448]
     rois, score, cid = mx.symbol.Custom(op_type='rpn_proposal',
                      rpn_det=rpn_det,
                      output_score=True,
-                     rpn_post_nms_top_n=400, im_info=im_info
+                     rpn_post_nms_top_n=2000, im_info=im_info
                      )
     rois = mx.symbol.reshape(rois, shape=(-1, 5))
     # rois = mx.symbol.MakeLoss(data=rois, grad_scale=0, name='rpn_roi')
@@ -2595,7 +2596,7 @@ def get_RCNN_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers, num_fil
     # rcnn roi proposal target
     group = mx.symbol.Custom(rois=rois, gt_boxes=label, op_type='bb8_proposal_target_offset_reg',
                          num_keypoints=8, batch_images=4,
-                         batch_rois=512, fg_fraction=1.0,
+                         batch_rois=1024, fg_fraction=1.0,
                          fg_overlap=0.5, bb8_variance=(0.1, 0.1),
                          im_info=im_info)
     rois = group[0]
@@ -2606,14 +2607,6 @@ def get_RCNN_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers, num_fil
     roi_pool = mx.symbol.contrib.ROIAlign(
         name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
         spatial_scale=1.0 / 8.)
-    # roi_pool = mx.symbol.Custom(op_type="fpn_roi_pool",
-    #                             rcnn_strides="(16,8,4)",
-    #                             pool_h=7, pool_w=7,
-    #                             feat_stride16=conv_fpn_feat_dict['stride16'],
-    #                             feat_stride8=conv_fpn_feat_dict['stride8'],
-    #                             feat_stride4=conv_fpn_feat_dict['stride4'],
-    #                             rois=rois)
-    # roi_pool = mx.symbol.MakeLoss(data=roi_pool, grad_scale=0., name='roi_pool')
 
     # # bb8 offset regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8offset_reg_flatten")
@@ -2715,7 +2708,6 @@ def get_RCNN_offset_resnet_fpn_test(num_classes, num_layers, num_filters,
     """
     from symbol.resnet import get_ssd_conv, get_ssd_conv_down
     data = mx.symbol.Variable('data')
-    label = mx.sym.Variable('label')
 
     # shared convolutional layers, bottom up
     conv_feat = get_ssd_conv(data, num_layers)
@@ -2742,7 +2734,7 @@ def get_RCNN_offset_resnet_fpn_test(num_classes, num_layers, num_filters,
 
     # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
     rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
-        name="rpn_proposal", nms_threshold=0.45, force_suppress=False,
+        name="rpn_proposal", nms_threshold=0.7, force_suppress=False,
         variances=(0.1, 0.1, 0.2, 0.2), nms_topk=400)
 
     # # select foreground region proposals, and transform the coordinate from [0,1] to [0, 448]
@@ -2757,14 +2749,6 @@ def get_RCNN_offset_resnet_fpn_test(num_classes, num_layers, num_filters,
     roi_pool = mx.symbol.contrib.ROIAlign(
         name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
         spatial_scale=1.0 / 8.)
-    # roi_pool = mx.symbol.Custom(op_type="fpn_roi_pool",
-    #                             rcnn_strides="(16,8,4)",
-    #                             pool_h=7, pool_w=7,
-    #                             feat_stride16=conv_fpn_feat_dict['stride16'],
-    #                             feat_stride8=conv_fpn_feat_dict['stride8'],
-    #                             feat_stride4=conv_fpn_feat_dict['stride4'],
-    #                             rois=rois)
-    # roi_pool = mx.symbol.MakeLoss(data=roi_pool, grad_scale=0., name='roi_pool')
 
     # # bb8 offset regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8offset_reg_flatten")
