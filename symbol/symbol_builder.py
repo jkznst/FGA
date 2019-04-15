@@ -1006,7 +1006,7 @@ def get_RCNN_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_fi
     rpn_targets = mx.contrib.symbol.MultiBoxTarget(
         *[anchor_boxes, label, cls_preds], overlap_threshold=.5, \
         ignore_label=-1, negative_mining_ratio=3, minimum_negative_samples=0, \
-        negative_mining_thresh=.5, variances=(0.1, 0.1, 0.2, 0.2),
+        negative_mining_thresh=.4, variances=(0.1, 0.1, 0.2, 0.2),
         name="multibox_target")
     loc_target = rpn_targets[0]
     loc_target_mask = rpn_targets[1]
@@ -1034,7 +1034,7 @@ def get_RCNN_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layers, num_fi
     rois, score, cid = mx.symbol.Custom(op_type='rpn_proposal',
                      rpn_det=rpn_det,
                      output_score=True,
-                     rpn_post_nms_top_n=1000, im_info=im_info
+                     rpn_post_nms_top_n=2000, im_info=im_info
                      )
     rois = mx.symbol.reshape(rois, shape=(-1, 5))
     # rois = mx.symbol.MakeLoss(data=rois, grad_scale=0, name='rpn_roi')
@@ -1936,6 +1936,7 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
 
     """
     from symbol.resnetm import get_ssd_conv, get_ssd_conv_down, pose_module
+
     data = mx.symbol.Variable('data')
     label = mx.sym.Variable('label')
 
@@ -1976,13 +1977,13 @@ def get_RCNN_boundary_offset_resnetm_fpn_train(num_classes, alpha_bb8, num_layer
     # rpn detection results merging all the levels, set a higher nms threshold to keep more proposals
     rpn_det = mx.contrib.symbol.MultiBoxDetection(*[cls_prob, loc_preds, anchor_boxes], \
         name="rpn_proposal", nms_threshold=0.7, force_suppress=False,
-        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=400)
+        variances=(0.1, 0.1, 0.2, 0.2), nms_topk=2000)
 
     # # select foreground region proposals, and transform the coordinate from [0,1] to [0, 448]
     rois, score, cid = mx.symbol.Custom(op_type='rpn_proposal',
                      rpn_det=rpn_det,
                      output_score=True,
-                     rpn_post_nms_top_n=400, im_info=im_info
+                     rpn_post_nms_top_n=2000, im_info=im_info
                      )
     rois = mx.symbol.reshape(rois, shape=(-1, 5))
     # rois = mx.symbol.MakeLoss(data=rois, grad_scale=0, name='rpn_roi')
