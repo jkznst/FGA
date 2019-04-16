@@ -1616,43 +1616,43 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         BoundingBox[6, :] = np.array([max_x, max_y, max_z])
         BoundingBox[7, :] = np.array([max_x, max_y, min_z])
 
-        # my epnp method
-        Xworld = np.reshape(BoundingBox, newshape=(-1, 3, 1))
-
         Ximg_pix = instance_bb8det
         Ximg_pix = np.reshape(Ximg_pix, newshape=(-1, 2, 1))
         img_shape = np.array([[[640.], [480.]]])  # 1x2x1
         Ximg_pix = Ximg_pix * img_shape
 
-        if bb8confidence is not None:
-            bb8_index = np.where(bb8confidence > 0.5)[0]
-            if len(bb8_index) >= 6:
-                # bb8_index = bb8_index[:, np.newaxis, np.newaxis]
-                # Xworld *= bb8_index
-                # Xworld = Xworld[Xworld.nonzero()].reshape((-1,3,1))
-                # Ximg_pix *= bb8_index
-                # Ximg_pix = Ximg_pix[Ximg_pix.nonzero()].reshape((-1,2,1))
-                Xworld = Xworld[bb8_index]
-                Ximg_pix = Ximg_pix[bb8_index]
+        # my epnp method
+        # Xworld = np.reshape(BoundingBox, newshape=(-1, 3, 1))
+        # if bb8confidence is not None:
+        #     bb8_index = np.where(bb8confidence > 0.5)[0]
+        #     if len(bb8_index) >= 6:
+        #         # bb8_index = bb8_index[:, np.newaxis, np.newaxis]
+        #         # Xworld *= bb8_index
+        #         # Xworld = Xworld[Xworld.nonzero()].reshape((-1,3,1))
+        #         # Ximg_pix *= bb8_index
+        #         # Ximg_pix = Ximg_pix[Ximg_pix.nonzero()].reshape((-1,2,1))
+        #         Xworld = Xworld[bb8_index]
+        #         Ximg_pix = Ximg_pix[bb8_index]
+        #
+        # epnpSolver = EPnP()
+        # error, Rt, Cc, Xc = epnpSolver.efficient_pnp_gauss(Xworld, Ximg_pix, self.cam_intrinsic)
+        # out = {"R": Rt[0:3, 0:3],
+        # "t": Rt[0:3, 3:4]}
 
-        epnpSolver = EPnP()
-        error, Rt, Cc, Xc = epnpSolver.efficient_pnp_gauss(Xworld, Ximg_pix, self.cam_intrinsic)
-        out = {"R": Rt[0:3, 0:3],
-        "t": Rt[0:3, 3:4]}
-
-        # opencv epnp method todo: test
-        # Xworld = np.expand_dims(BoundingBox, 0)
-        # Ximg_pix = np.expand_dims(Ximg_pix, 0)
-        # Xworld = np.ascontiguousarray(Xworld.astype(np.float64))
-        # Ximg_pix = np.ascontiguousarray(Ximg_pix.astype(np.float64))
-        # _ret, Rvec, tvec = cv2.solvePnP(Xworld,
-        #                                 Ximg_pix,
-        #                                 self.cam_intrinsic[0:3, 0:3],
-        #                                 distCoeffs=np.zeros([8, 1], dtype="float64"),
-        #                                 flags=cv2.SOLVEPNP_EPNP)
-        # R, _ = cv2.Rodrigues(Rvec)
-        # out = {"R": R,
-        #        "t": tvec}
+        # opencv epnp method, almost the same results as my_epnp, but faster ( 0.0176s).
+        Xworld = np.expand_dims(BoundingBox, 0)
+        Ximg_pix = Ximg_pix.reshape((-1, 2))
+        Ximg_pix = np.expand_dims(Ximg_pix, 0)
+        Xworld = np.ascontiguousarray(Xworld.astype(np.float64))
+        Ximg_pix = np.ascontiguousarray(Ximg_pix.astype(np.float64))
+        _ret, Rvec, tvec = cv2.solvePnP(Xworld,
+                                        Ximg_pix,
+                                        self.cam_intrinsic[0:3, 0:3],
+                                        distCoeffs=np.zeros([8, 1], dtype="float64"),
+                                        flags=cv2.SOLVEPNP_EPNP)
+        R, _ = cv2.Rodrigues(Rvec)
+        out = {"R": R,
+               "t": tvec}
 
         return out
 
