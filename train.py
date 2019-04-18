@@ -141,12 +141,6 @@ if __name__ == '__main__':
         if not args.prefix:
             args.prefix = 'out/resnet50'
         args.freeze_pattern = []
-    elif args.network == 'resnet50x':
-        if not args.pretrained:
-            args.pretrained = 'model/resnet-50-0000.params'
-        if not args.prefix:
-            args.prefix = 'out/resnet50x'
-        args.freeze_pattern = []
     elif args.network == 'resnet50d':
         if not args.pretrained:
             args.pretrained = 'model/resnet-50-0000.params'

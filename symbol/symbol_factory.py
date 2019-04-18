@@ -135,20 +135,6 @@ def get_config(network, data_shape, **kwargs):
         normalizations = -1
         steps = []
         return locals()
-    elif network == 'resnet50x':
-        num_layers = 50
-        image_shape = '3,224,224'  # resnet require it as shape check
-        network = 'resnetx'
-        from_layers = ['P3', 'P4', 'P5', 'P6', 'P7']
-        num_filters = [-1, -1, -1, -1, -1]
-        strides = [-1, -1, -1, -1, -1]
-        pads = [-1, -1, -1, -1, -1]
-        sizes = get_scales(min_scale=0.1, max_scale=0.5, num_layers=len(from_layers))
-        ratios = [[1, 2, .5], [1, 2, .5], [1, 2, .5], [1, 2, .5], \
-                  [1, 2, .5]]
-        normalizations = -1
-        steps = []
-        return locals()
     elif network == 'resnet50md':
         num_layers = 50
         image_shape = '3,224,224'  # resnet require it as shape check
@@ -302,7 +288,6 @@ def get_symbol_train(network, mode, data_shape, alpha_bb8, **kwargs):
     networks = {
         'vgg16': symbol_builder.get_vgg_reduced_fpn_train,
         'resnet50': getattr(symbol_builder, 'get_{}_resnet_fpn_train'.format(mode)),
-        'resnet50x': getattr(symbol_builder, 'get_{}_resnetx_fpn_train'.format(mode)),
         'resnet50d': symbol_builder.get_resnetd_fpn_train,
         'resnet50deeplabv2': symbol_builder.get_resnetdeeplabv2_fpn_train,
         'resnet50m':getattr(symbol_builder, 'get_{}_resnetm_fpn_train'.format(mode)),
@@ -335,7 +320,6 @@ def get_symbol(network, mode, data_shape, **kwargs):
     networks = {
         # 'vgg16': symbol_builder.get_vgg_reduced_fpn_test,
         'resnet50': getattr(symbol_builder, 'get_{}_resnet_fpn_test'.format(mode)),
-        'resnet50x': getattr(symbol_builder, 'get_{}_resnetx_fpn_test'.format(mode)),
         # 'resnet50d': symbol_builder.get_resnetd_fpn_test,
         # 'resnet50deeplabv2': symbol_builder.get_resnetdeeplabv2_fpn_test,
         'resnet50m': getattr(symbol_builder, 'get_{}_resnetm_fpn_test'.format(mode)),
