@@ -158,6 +158,43 @@ def get_resnet_conv_down(conv_feat):
     return conv_fpn_feat, [P6, P5, P4, P3, P2]
 
 
+def pose_module(conv_feat_stride4, conv_feat_stride8, conv_feat_stride16, conv_feat_stride32):
+    bottleneck_stride8 = residual_unit(conv_feat_stride8, num_filter=256, stride=(1,1), dim_match=True,
+                                         name="pose_module_stride8_unit1", bottle_neck=True, dilate=(1, 1), bn_mom=0.9, workspace=256,
+                                         memonger=False)
+    up_stride8 = mx.symbol.UpSampling(bottleneck_stride8, scale=2, sample_type='nearest', workspace=512,
+                                      name='pose_module_stride8_upsampling', num_args=1)
+
+    bottleneck_stride16 = residual_unit(conv_feat_stride16, num_filter=256, stride=(1,1), dim_match=True,
+                                        name="pose_module_stride16_unit1", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                                        workspace=256, memonger=False)
+    bottleneck_stride16 = residual_unit(bottleneck_stride16, num_filter=256, stride=(1, 1), dim_match=True,
+                                        name="pose_module_stride16_unit2", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                                        workspace=256, memonger=False)
+    up_stride16 = mx.symbol.UpSampling(bottleneck_stride16, scale=4, sample_type='nearest', workspace=512,
+                                      name='pose_module_stride16_upsampling', num_args=1)
+
+    bottleneck_stride32 = residual_unit(conv_feat_stride32, num_filter=256, stride=(1, 1), dim_match=True,
+                                        name="pose_module_stride32_unit1", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                                        workspace=256, memonger=False)
+    bottleneck_stride32 = residual_unit(bottleneck_stride32, num_filter=256, stride=(1, 1), dim_match=True,
+                                        name="pose_module_stride32_unit2", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                                        workspace=256, memonger=False)
+    bottleneck_stride32 = residual_unit(bottleneck_stride32, num_filter=256, stride=(1, 1), dim_match=True,
+                                        name="pose_module_stride32_unit3", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                                        workspace=256, memonger=False)
+    up_stride32 = mx.symbol.UpSampling(bottleneck_stride32, scale=8, sample_type='nearest', workspace=512,
+                                       name='pose_module_stride32_upsampling', num_args=1)
+
+    conv_feat = mx.symbol.concat(conv_feat_stride4, up_stride8, up_stride16, up_stride32, dim=1, name="pose_module_concat")
+
+    conv_feat = residual_unit(conv_feat, num_filter=256, stride=(1, 1), dim_match=False,
+                              name="pose_module_conv_feat_kp", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
+                              workspace=256, memonger=False)
+    return conv_feat
+
+
+
 def get_resnet_conv_down_mask_style(conv_feat):
     # C5 to P5, 1x1 dimension reduction to 256
     P5 = mx.symbol.Convolution(data=conv_feat[0], kernel=(1, 1), num_filter=256, name="P5_lateral")

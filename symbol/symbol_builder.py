@@ -2836,16 +2836,16 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     mx.Symbol
 
     """
-    from symbol.resnet import get_ssd_conv, get_ssd_conv_down
+    from symbol.resnet import get_resnet_conv, get_resnet_conv_down, pose_module
 
     data = mx.symbol.Variable('data')
     label = mx.sym.Variable('label')
 
     # shared convolutional layers, bottom up
-    conv_feat = get_ssd_conv(data, num_layers)
+    conv_feat = get_resnet_conv(data, num_layers)
 
     # shared convolutional layers, top down
-    conv_fpn_feat_dict, conv_fpn_feat = get_ssd_conv_down(conv_feat)
+    conv_fpn_feat_dict, conv_fpn_feat = get_resnet_conv_down(conv_feat)
     conv_fpn_feat.reverse()  # [P3, P4, P5, P6, P7]
 
     # rpn_bbox_pred : (N, 4 x num_anchors, H, W)
@@ -2906,10 +2906,13 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     boundary_reg_weight = group[3]
 
     # # rcnn roi pool
-    # conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'], conv_fpn_feat_dict['stride8'], conv_fpn_feat_dict['stride16'])
+    conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'],
+                               conv_fpn_feat_dict['stride8'],
+                               conv_fpn_feat_dict['stride16'],
+                               conv_fpn_feat_dict['stride32'])
     roi_pool = mx.symbol.contrib.ROIAlign(
-        name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
-        spatial_scale=1.0 / 8.)
+        name='roi_pool', data=conv_feat_kp, rois=rois, pooled_size=(7, 7),
+        spatial_scale=1.0 / 4.)
 
     # bb8 boundary cls + regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8boundary_flatten")
@@ -3059,14 +3062,14 @@ def get_RCNN_boundary_offset_resnet_fpn_test(num_classes, num_layers, num_filter
     mx.Symbol
 
     """
-    from symbol.resnet import get_ssd_conv, get_ssd_conv_down
+    from symbol.resnet import get_resnet_conv, get_resnet_conv_down, pose_module
     data = mx.symbol.Variable('data')
 
     # shared convolutional layers, bottom up
-    conv_feat = get_ssd_conv(data, num_layers)
+    conv_feat = get_resnet_conv(data, num_layers)
 
     # shared convolutional layers, top down
-    conv_fpn_feat_dict, conv_fpn_feat = get_ssd_conv_down(conv_feat)
+    conv_fpn_feat_dict, conv_fpn_feat = get_resnet_conv_down(conv_feat)
     conv_fpn_feat.reverse()  # [P3, P4, P5, P6, P7]
 
     # rpn_bbox_pred : (N, 4 x num_anchors, H, W)
@@ -3096,11 +3099,13 @@ def get_RCNN_boundary_offset_resnet_fpn_test(num_classes, num_layers, num_filter
     rois = mx.symbol.reshape(rois, shape=(-1, 5))
 
     # rcnn roi pool
-    # conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'], conv_fpn_feat_dict['stride8'],
-    #                            conv_fpn_feat_dict['stride16'])
+    conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'],
+                               conv_fpn_feat_dict['stride8'],
+                               conv_fpn_feat_dict['stride16'],
+                               conv_fpn_feat_dict['stride32'])
     roi_pool = mx.symbol.contrib.ROIAlign(
-        name='roi_pool', data=conv_fpn_feat_dict['stride8'], rois=rois, pooled_size=(7, 7),
-        spatial_scale=1.0 / 8.)
+        name='roi_pool', data=conv_feat_kp, rois=rois, pooled_size=(7, 7),
+        spatial_scale=1.0 / 4.)
 
     # bb8 boundary cls + regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8boundary_flatten")
