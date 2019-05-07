@@ -281,6 +281,11 @@ def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, 
     rcnn_boundary_bb8_delta_x = rcnn_boundary_bb8_pred_concat[index_0, index_1, index_2, boundary_id, 0]
     rcnn_boundary_bb8_delta_y = rcnn_boundary_bb8_pred_concat[index_0, index_1, index_2, boundary_id, 1]
 
+    # rcnn_boundary_bb8_delta_x = rcnn_boundary_bb8_pred_concat[:, :, :, :, 0] * rcnn_boundary_cls_prob
+    # rcnn_boundary_bb8_delta_y = rcnn_boundary_bb8_pred_concat[:, :, :, :, 1] * rcnn_boundary_cls_prob
+    # rcnn_boundary_bb8_delta_x = np.sum(rcnn_boundary_bb8_delta_x, axis=-1)
+    # rcnn_boundary_bb8_delta_y = np.sum(rcnn_boundary_bb8_delta_y, axis=-1)
+
     rcnn_boundary_bb8_pred_x = rcnn_boundary_bb8_delta_x * aw * variances[0] + np.where(condition_boundary_l, al, ar)
     rcnn_boundary_bb8_pred_y = rcnn_boundary_bb8_delta_y * ah * variances[1] + np.where(condition_boundary_t, at, ab)
 
