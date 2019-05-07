@@ -86,10 +86,10 @@ def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, im_info):
     gt_bb8_coordinates_y = gt_bb8_coordinates[:, :, 1] * im_info[0]
 
     # four quadrant soft cls target
-    distance_x_left = gt_bb8_coordinates_x - ex_rois[:, 0:1]    # shape (N, 8)
-    distance_x_right = gt_bb8_coordinates_x - ex_rois[:, 2:3]
-    distance_y_top = gt_bb8_coordinates_y - ex_rois[:, 1:2]
-    distance_y_bottom = gt_bb8_coordinates_y - ex_rois[:, 3:4]
+    distance_x_left = (gt_bb8_coordinates_x - ex_rois[:, 0:1])  / ex_widths[:, np.newaxis] * 3.  # shape (N, 8)
+    distance_x_right = (gt_bb8_coordinates_x - ex_rois[:, 2:3]) / ex_widths[:, np.newaxis] * 3.
+    distance_y_top = (gt_bb8_coordinates_y - ex_rois[:, 1:2]) / ex_heights[:, np.newaxis] * 3.
+    distance_y_bottom = (gt_bb8_coordinates_y - ex_rois[:, 3:4]) / ex_heights[:, np.newaxis] * 3.
 
     distance_0 = np.sqrt(np.square(distance_x_left) + np.square(distance_y_top))
     distance_1 = np.sqrt(np.square(distance_x_right) + np.square(distance_y_top))
@@ -130,7 +130,7 @@ def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, im_info):
     boundary_reg_weights = np.zeros(shape=(boundary_cls_targets.shape[0] * boundary_cls_targets.shape[1], 4, 2))
     boundary_reg_weights[index_cls, boundary_cls_targets_hard.flatten(), :] = 1
     # boundary_reg_weights = np.stack((boundary_cls_targets, boundary_cls_targets), axis=-1).reshape((boundary_cls_targets.shape[0], -1))
-    # boundary_reg_weights = boundary_reg_weights.reshape((boundary_cls_targets.shape[0], -1))
+    boundary_reg_weights = boundary_reg_weights.reshape((boundary_cls_targets.shape[0], -1))
 
     if DEBUG:
         print("boundary_cls_target_soft:", boundary_cls_targets[0])
