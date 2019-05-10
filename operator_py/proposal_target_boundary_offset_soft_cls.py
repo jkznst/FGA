@@ -5,7 +5,7 @@ Proposal Target Operator selects foreground and background roi and assigns label
 import mxnet as mx
 import numpy as np
 
-DEBUG = False
+DEBUG = True
 
 def bbox_overlaps(boxes, query_boxes):
     """
@@ -86,18 +86,19 @@ def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, im_info):
     gt_bb8_coordinates_y = gt_bb8_coordinates[:, :, 1] * im_info[0]
 
     # four quadrant soft cls target
-    distance_x_left = (gt_bb8_coordinates_x - ex_rois[:, 0:1])  / ex_widths[:, np.newaxis] * 3.  # shape (N, 8)
-    distance_x_right = (gt_bb8_coordinates_x - ex_rois[:, 2:3]) / ex_widths[:, np.newaxis] * 3.
-    distance_y_top = (gt_bb8_coordinates_y - ex_rois[:, 1:2]) / ex_heights[:, np.newaxis] * 3.
-    distance_y_bottom = (gt_bb8_coordinates_y - ex_rois[:, 3:4]) / ex_heights[:, np.newaxis] * 3.
+    distance_x_left = (gt_bb8_coordinates_x - ex_rois[:, 0:1])  #/ ex_widths[:, np.newaxis] * 3.  # shape (N, 8)
+    distance_x_right = (gt_bb8_coordinates_x - ex_rois[:, 2:3]) #/ ex_widths[:, np.newaxis] * 3.
+    distance_y_top = (gt_bb8_coordinates_y - ex_rois[:, 1:2]) #/ ex_heights[:, np.newaxis] * 3.
+    distance_y_bottom = (gt_bb8_coordinates_y - ex_rois[:, 3:4]) #/ ex_heights[:, np.newaxis] * 3.
 
-    distance_0 = np.sqrt(np.square(distance_x_left) + np.square(distance_y_top))
-    distance_1 = np.sqrt(np.square(distance_x_right) + np.square(distance_y_top))
-    distance_2 = np.sqrt(np.square(distance_x_left) + np.square(distance_y_bottom))
-    distance_3 = np.sqrt(np.square(distance_x_right) + np.square(distance_y_bottom))
+    distance_0 = np.sqrt(np.square(distance_x_left / ex_widths[:, np.newaxis]) + np.square(distance_y_top / ex_heights[:, np.newaxis]))
+    distance_1 = np.sqrt(np.square(distance_x_right / ex_widths[:, np.newaxis]) + np.square(distance_y_top / ex_heights[:, np.newaxis]))
+    distance_2 = np.sqrt(np.square(distance_x_left / ex_widths[:, np.newaxis]) + np.square(distance_y_bottom / ex_heights[:, np.newaxis]))
+    distance_3 = np.sqrt(np.square(distance_x_right / ex_widths[:, np.newaxis]) + np.square(distance_y_bottom / ex_heights[:, np.newaxis]))
 
     # distance has shape (N, 8, 4)
-    distance = np.stack((distance_0, distance_1, distance_2, distance_3), axis=-1)
+    beta = 3.0
+    distance = np.stack((distance_0, distance_1, distance_2, distance_3), axis=-1) * beta
     boundary_cls_targets = stable_softmax(-distance, axis=-1)
 
     # four quadrant one-hot cls target
