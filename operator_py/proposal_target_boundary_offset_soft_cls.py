@@ -5,7 +5,7 @@ Proposal Target Operator selects foreground and background roi and assigns label
 import mxnet as mx
 import numpy as np
 
-DEBUG = True
+DEBUG = False
 
 def bbox_overlaps(boxes, query_boxes):
     """
