@@ -166,11 +166,19 @@ def get_resnet_conv_down(conv_feat):
 
 
 def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_stride16, conv_feat_stride32,
-                               num_channels=(256, 256, 256, 256), name=None):
+                               in_channels=(256,256,256,256),out_channels=(256, 256, 256, 256), name=None):
     # fusion stride4
-    fusion_stride4_path1 = conv_feat_stride4
+    if in_channels[0] == out_channels[0]:
+        fusion_stride4_path1 = conv_feat_stride4
+    else:
+        fusion_stride4_path1 = mx.symbol.Convolution(conv_feat_stride4, kernel=(1,1), stride=(1,1), pad=(0,0),
+                                                 num_filter=out_channels[0], no_bias=True, workspace=workspace,
+                                                 name=name+"feat_fusion_stride4_path1_conv")
+        fusion_stride4_path1 = mx.symbol.BatchNorm(data=fusion_stride4_path1, fix_gamma=False, eps=2e-5,
+                                                   name=name + "feat_fusion_stride4_path1_bn")
+
     fusion_stride4_path2 = mx.symbol.Convolution(conv_feat_stride8, kernel=(1,1), stride=(1,1), pad=(0,0),
-                                                 num_filter=num_channels[0], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[0], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride4_path2_conv")
     fusion_stride4_path2 = mx.symbol.BatchNorm(data=fusion_stride4_path2, fix_gamma=False, eps=2e-5,
                                                name=name+"feat_fusion_stride4_path2_bn")
@@ -178,7 +186,7 @@ def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_s
                                       name=name+'feat_fusion_stride4_path2_upsampling', num_args=1)
 
     fusion_stride4_path3 = mx.symbol.Convolution(conv_feat_stride16, kernel=(1,1), stride=(1,1), pad=(0,0),
-                                                 num_filter=num_channels[0], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[0], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride4_path3_conv")
     fusion_stride4_path3 = mx.symbol.BatchNorm(data=fusion_stride4_path3, fix_gamma=False, eps=2e-5,
                                                name=name+"feat_fusion_stride4_path3_bn")
@@ -187,7 +195,7 @@ def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_s
                                                 name=name+'feat_fusion_stride4_path3_upsampling', num_args=1)
 
     fusion_stride4_path4 = mx.symbol.Convolution(conv_feat_stride32, kernel=(1, 1), stride=(1, 1), pad=(0, 0),
-                                                 num_filter=num_channels[0], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[0], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride4_path4_conv")
     fusion_stride4_path4 = mx.symbol.BatchNorm(data=fusion_stride4_path4, fix_gamma=False, eps=2e-5,
                                                name=name+"feat_fusion_stride4_path4_bn")
@@ -198,15 +206,22 @@ def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_s
 
     # fusion stride 8
     fusion_stride8_path1 = mx.symbol.Convolution(conv_feat_stride4, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                 num_filter=num_channels[1], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[1], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride8_path1_conv")
     fusion_stride8_path1 = mx.symbol.BatchNorm(data=fusion_stride8_path1, fix_gamma=False, eps=2e-5,
                                                name=name + "feat_fusion_stride8_path1_bn")
 
-    fusion_stride8_path2 = conv_feat_stride8
+    if in_channels[1] == out_channels[1]:
+        fusion_stride8_path2 = conv_feat_stride8
+    else:
+        fusion_stride8_path2 = mx.symbol.Convolution(conv_feat_stride8, kernel=(1,1), stride=(1,1), pad=(0,0),
+                                                 num_filter=out_channels[1], no_bias=True, workspace=workspace,
+                                                 name=name+"feat_fusion_stride8_path2_conv")
+        fusion_stride8_path2 = mx.symbol.BatchNorm(data=fusion_stride8_path2, fix_gamma=False, eps=2e-5,
+                                               name=name + "feat_fusion_stride8_path2_bn")
 
     fusion_stride8_path3 = mx.symbol.Convolution(conv_feat_stride16, kernel=(1,1), stride=(1,1), pad=(0,0),
-                                                 num_filter=num_channels[1], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[1], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride8_path3_conv")
     fusion_stride8_path3 = mx.symbol.BatchNorm(data=fusion_stride8_path3, fix_gamma=False, eps=2e-5,
                                                name=name + "feat_fusion_stride8_path3_bn")
@@ -214,7 +229,7 @@ def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_s
                                                 workspace=workspace,
                                                 name=name + 'feat_fusion_stride8_path3_upsampling', num_args=1)
     fusion_stride8_path4 = mx.symbol.Convolution(conv_feat_stride32, kernel=(1, 1), stride=(1, 1), pad=(0, 0),
-                                                 num_filter=num_channels[1], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[1], no_bias=True, workspace=workspace,
                                                  name=name + "feat_fusion_stride8_path4_conv")
     fusion_stride8_path4 = mx.symbol.BatchNorm(data=fusion_stride8_path4, fix_gamma=False, eps=2e-5,
                                                name=name + "feat_fusion_stride8_path4_bn")
@@ -225,28 +240,35 @@ def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_s
 
     # fusion stride16
     fusion_stride16_path1 = mx.symbol.Convolution(conv_feat_stride4, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                 num_filter=num_channels[0], no_bias=True, workspace=workspace,
+                                                 num_filter=in_channels[0], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride16_path1_conv1")
     fusion_stride16_path1 = mx.symbol.BatchNorm(data=fusion_stride16_path1, fix_gamma=False, eps=2e-5,
                                                name=name + "feat_fusion_stride16_path1_bn1")
     fusion_stride16_path1 = mx.symbol.Activation(fusion_stride16_path1, act_type="relu",
                                                  name=name + "feat_fusion_stride16_path1_relu")
     fusion_stride16_path1 = mx.symbol.Convolution(fusion_stride16_path1, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                  num_filter=num_channels[2], no_bias=True, workspace=workspace,
+                                                  num_filter=out_channels[2], no_bias=True, workspace=workspace,
                                                   name=name + "feat_fusion_stride16_path1_conv2")
     fusion_stride16_path1 = mx.symbol.BatchNorm(data=fusion_stride16_path1, fix_gamma=False, eps=2e-5,
                                                 name=name + "feat_fusion_stride16_path1_bn2")
 
     fusion_stride16_path2 = mx.symbol.Convolution(conv_feat_stride8, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                 num_filter=num_channels[2], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[2], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride16_path2_conv")
     fusion_stride16_path2 = mx.symbol.BatchNorm(data=fusion_stride16_path2, fix_gamma=False, eps=2e-5,
                                                name=name + "feat_fusion_stride16_path2_bn")
 
-    fusion_stride16_path3 = conv_feat_stride16
+    if in_channels[2] == out_channels[2]:
+        fusion_stride16_path3 = conv_feat_stride16
+    else:
+        fusion_stride16_path3 = mx.symbol.Convolution(conv_feat_stride16, kernel=(1, 1), stride=(1, 1), pad=(0, 0),
+                                                 num_filter=out_channels[2], no_bias=True, workspace=workspace,
+                                                 name=name + "feat_fusion_stride16_path3_conv")
+        fusion_stride16_path3 = mx.symbol.BatchNorm(data=fusion_stride16_path3, fix_gamma=False, eps=2e-5,
+                                               name=name + "feat_fusion_stride16_path3_bn")
 
     fusion_stride16_path4 = mx.symbol.Convolution(conv_feat_stride32, kernel=(1, 1), stride=(1, 1), pad=(0, 0),
-                                                 num_filter=num_channels[2], no_bias=True, workspace=workspace,
+                                                 num_filter=out_channels[2], no_bias=True, workspace=workspace,
                                                  name=name + "feat_fusion_stride16_path4_conv")
     fusion_stride16_path4 = mx.symbol.BatchNorm(data=fusion_stride16_path4, fix_gamma=False, eps=2e-5,
                                                name=name + "feat_fusion_stride16_path4_bn")
@@ -257,45 +279,52 @@ def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_s
 
     # fusion stride32
     fusion_stride32_path1 = mx.symbol.Convolution(conv_feat_stride4, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                  num_filter=num_channels[0], no_bias=True, workspace=workspace,
+                                                  num_filter=in_channels[0], no_bias=True, workspace=workspace,
                                                   name=name + "feat_fusion_stride32_path1_conv1")
     fusion_stride32_path1 = mx.symbol.BatchNorm(data=fusion_stride32_path1, fix_gamma=False, eps=2e-5,
                                                 name=name + "feat_fusion_stride32_path1_bn1")
     fusion_stride32_path1 = mx.symbol.Activation(fusion_stride32_path1, act_type="relu",
                                                  name=name + "feat_fusion_stride32_path1_relu1")
     fusion_stride32_path1 = mx.symbol.Convolution(fusion_stride32_path1, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                  num_filter=num_channels[0], no_bias=True, workspace=workspace,
+                                                  num_filter=in_channels[0], no_bias=True, workspace=workspace,
                                                   name=name + "feat_fusion_stride32_path1_conv2")
     fusion_stride32_path1 = mx.symbol.BatchNorm(data=fusion_stride32_path1, fix_gamma=False, eps=2e-5,
                                                 name=name + "feat_fusion_stride32_path1_bn2")
     fusion_stride32_path1 = mx.symbol.Activation(fusion_stride32_path1, act_type="relu",
                                                  name=name + "feat_fusion_stride32_path1_relu2")
     fusion_stride32_path1 = mx.symbol.Convolution(fusion_stride32_path1, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                  num_filter=num_channels[3], no_bias=True, workspace=workspace,
+                                                  num_filter=out_channels[3], no_bias=True, workspace=workspace,
                                                   name=name + "feat_fusion_stride32_path1_conv3")
     fusion_stride32_path1 = mx.symbol.BatchNorm(data=fusion_stride32_path1, fix_gamma=False, eps=2e-5,
                                                 name=name + "feat_fusion_stride32_path1_bn3")
 
     fusion_stride32_path2 = mx.symbol.Convolution(conv_feat_stride8, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                 num_filter=num_channels[1], no_bias=True, workspace=workspace,
+                                                 num_filter=in_channels[1], no_bias=True, workspace=workspace,
                                                  name=name+"feat_fusion_stride32_path2_conv1")
     fusion_stride32_path2 = mx.symbol.BatchNorm(data=fusion_stride32_path2, fix_gamma=False, eps=2e-5,
                                                name=name + "feat_fusion_stride32_path2_bn1")
     fusion_stride32_path2 = mx.symbol.Activation(fusion_stride32_path2, act_type="relu",
                                                  name=name + "feat_fusion_stride32_path2_relu1")
     fusion_stride32_path2 = mx.symbol.Convolution(fusion_stride32_path2, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                  num_filter=num_channels[3], no_bias=True, workspace=workspace,
+                                                  num_filter=out_channels[3], no_bias=True, workspace=workspace,
                                                   name=name + "feat_fusion_stride32_path2_conv2")
     fusion_stride32_path2 = mx.symbol.BatchNorm(data=fusion_stride32_path2, fix_gamma=False, eps=2e-5,
                                                 name=name + "feat_fusion_stride32_path2_bn2")
 
     fusion_stride32_path3 = mx.symbol.Convolution(conv_feat_stride16, kernel=(3, 3), stride=(2, 2), pad=(1, 1),
-                                                  num_filter=num_channels[3], no_bias=True, workspace=workspace,
+                                                  num_filter=out_channels[3], no_bias=True, workspace=workspace,
                                                   name=name + "feat_fusion_stride32_path3_conv")
     fusion_stride32_path3 = mx.symbol.BatchNorm(data=fusion_stride32_path3, fix_gamma=False, eps=2e-5,
                                                 name=name + "feat_fusion_stride32_path3_bn")
 
-    fusion_stride32_path4 = conv_feat_stride32
+    if in_channels[3] == out_channels[3]:
+        fusion_stride32_path4 = conv_feat_stride32
+    else:
+        fusion_stride32_path4 = mx.symbol.Convolution(conv_feat_stride32, kernel=(1, 1), stride=(1, 1), pad=(0, 0),
+                                                      num_filter=out_channels[3], no_bias=True, workspace=workspace,
+                                                      name=name + "feat_fusion_stride32_path4_conv")
+        fusion_stride32_path4 = mx.symbol.BatchNorm(data=fusion_stride32_path4, fix_gamma=False, eps=2e-5,
+                                                    name=name + "feat_fusion_stride32_path4_bn")
     fusion_stride32 = fusion_stride32_path1 + fusion_stride32_path2 + fusion_stride32_path3 + fusion_stride32_path4
 
     return fusion_stride4, fusion_stride8, fusion_stride16, fusion_stride32
