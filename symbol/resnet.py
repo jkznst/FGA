@@ -360,7 +360,8 @@ def pose_module(conv_feat_stride4, conv_feat_stride8, conv_feat_stride16, conv_f
 
     conv_feat_stride4, bottleneck_stride8, bottleneck_stride16, bottleneck_stride32 = \
         multi_scale_feature_fusion(conv_feat_stride4, bottleneck_stride8, bottleneck_stride16,
-                                         bottleneck_stride32, num_channels=(256, 256, 256, 256),
+                                         bottleneck_stride32, in_channels=(256, 256, 256, 256),
+                                         out_channels=(256, 256, 256, 256),
                                          name="pose_module")
 
     up_stride8 = mx.symbol.UpSampling(bottleneck_stride8, scale=2, sample_type='nearest', workspace=512,
