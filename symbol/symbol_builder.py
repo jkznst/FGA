@@ -2836,7 +2836,7 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     mx.Symbol
 
     """
-    from symbol.resnet import get_resnet_conv, get_resnet_conv_down, pose_module
+    from symbol.resnet import get_resnet_conv, get_resnet_conv_down, pose_module #, attention_module_v1
 
     data = mx.symbol.Variable('data')
     label = mx.sym.Variable('label')
@@ -2913,6 +2913,7 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     roi_pool = mx.symbol.contrib.ROIAlign(
         name='roi_pool', data=conv_feat_kp, rois=rois, pooled_size=(7, 7),
         spatial_scale=1.0 / 4.)
+    # roi_pool = attention_module_v1(roi_pool, channel=256, width=7, height=7)
 
     # bb8 boundary cls + regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8boundary_flatten")
@@ -3062,7 +3063,7 @@ def get_RCNN_boundary_offset_resnet_fpn_test(num_classes, num_layers, num_filter
     mx.Symbol
 
     """
-    from symbol.resnet import get_resnet_conv, get_resnet_conv_down, pose_module
+    from symbol.resnet import get_resnet_conv, get_resnet_conv_down, pose_module #, attention_module_v1
     data = mx.symbol.Variable('data')
 
     # shared convolutional layers, bottom up
@@ -3106,6 +3107,7 @@ def get_RCNN_boundary_offset_resnet_fpn_test(num_classes, num_layers, num_filter
     roi_pool = mx.symbol.contrib.ROIAlign(
         name='roi_pool', data=conv_feat_kp, rois=rois, pooled_size=(7, 7),
         spatial_scale=1.0 / 4.)
+    # roi_pool = attention_module_v1(roi_pool, channel=256, width=7, height=7)
 
     # bb8 boundary cls + regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8boundary_flatten")

@@ -330,6 +330,40 @@ def multi_scale_feature_fusion(conv_feat_stride4, conv_feat_stride8, conv_feat_s
     return fusion_stride4, fusion_stride8, fusion_stride16, fusion_stride32
 
 
+def attention_module_v1(conv_feature, channel=256, width=7, height=7):
+    # channel wise attention
+    channel_max_pool = mx.symbol.Pooling(data=conv_feature, kernel=(width, height), pool_type='max', global_pool=True,
+                                 pad=(0, 0), name="channelwise_attention_maxpooling")
+    channel_avg_pool = mx.symbol.Pooling(data=conv_feature, kernel=(width, height), pool_type='avg', global_pool=True,
+                                 pad=(0, 0), name="channelwise_attention_avgpooling")
+    channel_feat = mx.symbol.concat(channel_max_pool, channel_avg_pool, dim=1)
+    channel_feat = mx.symbol.flatten(data=channel_feat, name="channelwise_attention_flatten")
+    mlp1_weight = mx.symbol.Variable(name="channelwise_attention_mlp1_weight", init=mx.init.Xavier())
+    mlp1_bias = mx.symbol.Variable(name="channelwise_attention_mlp1_bias", init=mx.init.Constant(0.0))
+    channel_feat = mx.symbol.FullyConnected(data=channel_feat, weight=mlp1_weight, bias=mlp1_bias, num_hidden=int(channel / 4.0),
+                                   name="channelwise_attention_mlp1")
+    channel_feat = mx.symbol.Activation(data=channel_feat, act_type="relu", name="channelwise_attention_mlp1_relu")
+    mlp2_weight = mx.symbol.Variable(name="channelwise_attention_mlp2_weight", init=mx.init.Xavier())
+    mlp2_bias = mx.symbol.Variable(name="channelwise_attention_mlp2_bias", init=mx.init.Constant(0.0))
+    channel_feat = mx.symbol.FullyConnected(data=channel_feat, weight=mlp2_weight, bias=mlp2_bias,
+                                            num_hidden=channel,
+                                            name="channelwise_attention_mlp2")
+    channel_feat = mx.symbol.Activation(data=channel_feat, act_type="sigmoid", name="channelwise_attention_mlp1_sigmoid")
+    channel_feat = channel_feat.reshape((0, 0, 1, 1))
+    channel_refined_feat = mx.symbol.broadcast_mul(channel_feat, conv_feature)
+
+    # spatial attention
+    spatial_max_pool = mx.symbol.max_axis(data=channel_refined_feat, axis=1, keepdims=True, name="spatial_attention_maxpool")
+    spatial_avg_pool = mx.symbol.mean(data=channel_refined_feat, axis=1, keepdims=True, name="spatial_attention_avgpool")
+    spatial_feat = mx.symbol.concat(spatial_max_pool, spatial_avg_pool, dim=1)
+    spatial_feat = mx.symbol.Convolution(data=spatial_feat, kernel=(3, 3), stride=(1, 1),
+                                         pad=(1, 1), num_filter=1, no_bias=True, name="spatial_attention_conv")
+    spatial_feat = mx.symbol.BatchNorm(data=spatial_feat, fix_gamma=False, eps=2e-5,
+                                               name="spatial_attention_bn")
+    spatial_feat = mx.symbol.Activation(spatial_feat, act_type="sigmoid", name="spatial_attention_sigmoid")
+    spatial_refined_feat = mx.symbol.broadcast_mul(spatial_feat, channel_refined_feat)
+    return spatial_refined_feat
+
 def pose_module(conv_feat_stride4, conv_feat_stride8, conv_feat_stride16, conv_feat_stride32, use_depthwize_conv=False):
     bottleneck_stride8 = residual_unit(conv_feat_stride8, num_filter=256, stride=(1,1), dim_match=True,
                                          name="pose_module_stride8_unit1", bottle_neck=True, dilate=(1, 1), bn_mom=0.9,
