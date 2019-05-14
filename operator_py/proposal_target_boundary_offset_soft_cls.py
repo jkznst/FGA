@@ -91,19 +91,19 @@ def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, im_info):
     distance_y_top = (gt_bb8_coordinates_y - ex_rois[:, 1:2]) #/ ex_heights[:, np.newaxis] * 3.
     distance_y_bottom = (gt_bb8_coordinates_y - ex_rois[:, 3:4]) #/ ex_heights[:, np.newaxis] * 3.
 
-    # distance_0 = np.sqrt(np.square(distance_x_left / ex_widths[:, np.newaxis]) + np.square(distance_y_top / ex_heights[:, np.newaxis]))
-    # distance_1 = np.sqrt(np.square(distance_x_right / ex_widths[:, np.newaxis]) + np.square(distance_y_top / ex_heights[:, np.newaxis]))
-    # distance_2 = np.sqrt(np.square(distance_x_left / ex_widths[:, np.newaxis]) + np.square(distance_y_bottom / ex_heights[:, np.newaxis]))
-    # distance_3 = np.sqrt(np.square(distance_x_right / ex_widths[:, np.newaxis]) + np.square(distance_y_bottom / ex_heights[:, np.newaxis]))
+    distance_0 = np.sqrt(np.square(distance_x_left / ex_widths[:, np.newaxis]) + np.square(distance_y_top / ex_heights[:, np.newaxis]))
+    distance_1 = np.sqrt(np.square(distance_x_right / ex_widths[:, np.newaxis]) + np.square(distance_y_top / ex_heights[:, np.newaxis]))
+    distance_2 = np.sqrt(np.square(distance_x_left / ex_widths[:, np.newaxis]) + np.square(distance_y_bottom / ex_heights[:, np.newaxis]))
+    distance_3 = np.sqrt(np.square(distance_x_right / ex_widths[:, np.newaxis]) + np.square(distance_y_bottom / ex_heights[:, np.newaxis]))
 
-    distance_0 = np.sqrt(
-        np.square(distance_x_left) + np.square(distance_y_top))
-    distance_1 = np.sqrt(
-        np.square(distance_x_right) + np.square(distance_y_top))
-    distance_2 = np.sqrt(np.square(distance_x_left) + np.square(
-        distance_y_bottom))
-    distance_3 = np.sqrt(np.square(distance_x_right) + np.square(
-        distance_y_bottom))
+    # distance_0 = np.sqrt(
+    #     np.square(distance_x_left) + np.square(distance_y_top))
+    # distance_1 = np.sqrt(
+    #     np.square(distance_x_right) + np.square(distance_y_top))
+    # distance_2 = np.sqrt(np.square(distance_x_left) + np.square(
+    #     distance_y_bottom))
+    # distance_3 = np.sqrt(np.square(distance_x_right) + np.square(
+    #     distance_y_bottom))
 
     # distance has shape (N, 8, 4)
     beta = 1.0

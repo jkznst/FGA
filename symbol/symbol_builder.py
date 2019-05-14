@@ -2906,10 +2906,11 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     boundary_reg_weight = group[3]
 
     # # rcnn roi pool
-    conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'],
-                               conv_fpn_feat_dict['stride8'],
-                               conv_fpn_feat_dict['stride16'],
-                               conv_fpn_feat_dict['stride32'])
+    # conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'],
+    #                            conv_fpn_feat_dict['stride8'],
+    #                            conv_fpn_feat_dict['stride16'],
+    #                            conv_fpn_feat_dict['stride32'])
+    conv_feat_kp = conv_fpn_feat_dict['stride4']
     roi_pool = mx.symbol.contrib.ROIAlign(
         name='roi_pool', data=conv_feat_kp, rois=rois, pooled_size=(7, 7),
         spatial_scale=1.0 / 4.)
@@ -3100,10 +3101,11 @@ def get_RCNN_boundary_offset_resnet_fpn_test(num_classes, num_layers, num_filter
     rois = mx.symbol.reshape(rois, shape=(-1, 5))
 
     # rcnn roi pool
-    conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'],
-                               conv_fpn_feat_dict['stride8'],
-                               conv_fpn_feat_dict['stride16'],
-                               conv_fpn_feat_dict['stride32'])
+    # conv_feat_kp = pose_module(conv_fpn_feat_dict['stride4'],
+    #                            conv_fpn_feat_dict['stride8'],
+    #                            conv_fpn_feat_dict['stride16'],
+    #                            conv_fpn_feat_dict['stride32'])
+    conv_feat_kp = conv_fpn_feat_dict['stride4']
     roi_pool = mx.symbol.contrib.ROIAlign(
         name='roi_pool', data=conv_feat_kp, rois=rois, pooled_size=(7, 7),
         spatial_scale=1.0 / 4.)
