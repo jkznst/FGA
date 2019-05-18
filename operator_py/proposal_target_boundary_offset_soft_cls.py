@@ -106,7 +106,7 @@ def bb8_transform(ex_rois, gt_bb8_coordinates, bb8_variance, im_info):
     #     distance_y_bottom))
 
     # distance has shape (N, 8, 4)
-    beta = 1.0
+    beta = 10.0
     distance = np.stack((distance_0, distance_1, distance_2, distance_3), axis=-1) * beta
     boundary_cls_targets = stable_softmax(-distance, axis=-1)
 
