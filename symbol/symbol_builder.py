@@ -2902,7 +2902,7 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
                              im_info=im_info)
     rois = group[0]
     boundary_cls_target = group[1]  # (N, 8, 4) for soft cls, (N, 8) for hard cls
-    boundary_reg_target = group[2]  # (N, 16)
+    boundary_reg_target = group[2]  # (N, 64) for cls-specific
     boundary_reg_weight = group[3]
 
     # # rcnn roi pool
@@ -2948,6 +2948,10 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
                                                      data=boundary_reg_weight * (
                                                              rcnn_bb8boundary_reg_pred - boundary_reg_target),
                                                      scalar=1.0)
+    ohcm_mask = mx.symbol.topk(data=rcnn_bb8boundary_reg_loss_, axis=-1, k=16, ret_typ='mask', is_ascend=False)
+    ohcm_mask = mx.symbol.BlockGrad(ohcm_mask)
+    rcnn_bb8boundary_reg_loss_ = rcnn_bb8boundary_reg_loss_ * ohcm_mask
+
     rcnn_bb8boundary_cls_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_cls_score.reshape((0, 8, -1)),
                                                  cls_target=boundary_cls_target,
                                                  name="rcnn_bb8boundary_cls_loss",
