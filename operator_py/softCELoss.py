@@ -41,11 +41,17 @@ class SoftCELossOperator(mx.operator.CustomOp):
         # print(cls_target[0:10])
 
         d_cls_score = cls_prob - cls_target
+        # hard sample mining
+        max_target = mx.nd.max_axis(data=cls_target, axis=-1, keepdims=True)
+        valid_c = mx.nd.sum(max_target > 0)
+        reweight = mx.nd.where(max_target > 0, 1 - max_target, mx.nd.zeros_like(max_target))
+        reweight = valid_c / mx.nd.sum(reweight)
 
         # filter out invalid label
         valid_condition = (cls_target != self._ignore_label)
         # print(valid_condition[0:100])
         # print(self._grad_scale)
+        d_cls_score = reweight * d_cls_score * (1 - max_target)
         d_cls_score = mx.nd.where(valid_condition, d_cls_score, mx.nd.zeros_like(d_cls_score))
 
         if self._normalization == "valid":
