@@ -1273,11 +1273,11 @@ def RCNNBoundaryOffsetBB8MultiBoxDetectionClsSpecific(rois_concat, score_concat,
         p_out[0:len(keep_indices)] = p_out[keep_indices]
 
         # apply kpt nms
-        keep_indices = kpt_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
-                                                 p_bb8_confidence_y[0:nkeep],
-                                                 nms_threshold, force_suppress, num_classes)
-        keep_indices = np.array(keep_indices)
-        p_out[0:len(keep_indices)] = p_out[keep_indices]
+        # keep_indices = kpt_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+        #                                          p_bb8_confidence_y[0:nkeep],
+        #                                          nms_threshold, force_suppress, num_classes)
+        # keep_indices = np.array(keep_indices)
+        # p_out[0:len(keep_indices)] = p_out[keep_indices]
 
         # apply kpt voting nms
         # keep_indices, keep_voted_kpts = kpt_voting_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
