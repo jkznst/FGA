@@ -554,7 +554,58 @@ def keypoint_voting(kpt, conf_x, conf_y, voting_kpts, ovrlaps, conf_vks_x, conf_
     return voted_kpt
 
 
-def pose_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True, num_classes=1):
+def kpt_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True, num_classes=1):
+    """
+    greedily select boxes with high confidence and overlap with current maximum <= thresh
+    rule out overlap >= thresh
+    :param dets: NDArray, [[cid, score, x1, y1, x2, y2]]
+    :param thresh: retain overlap < thresh
+    :return: indexes to keep
+    """
+    dets = dets.asnumpy()
+    x1 = dets[:, 2]
+    y1 = dets[:, 3]
+    x2 = dets[:, 4]
+    y2 = dets[:, 5]
+    scores = dets[:, 1]
+    cids = dets[:, 0]
+    kpts = dets[:, 6:22]
+    bb8_confidences_x = confidence_x.asnumpy()
+    bb8_confidences_y = confidence_y.asnumpy()
+
+    areas = (x2 - x1) * (y2 - y1)
+    order = scores.argsort()[::-1]
+
+    keep = []
+
+    if force_suppress:
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+
+            oks_ovr = oks_iou(kpts[i], kpts[order[1:]], areas[i], areas[order[1:]])
+
+            inds = np.where(oks_ovr <= thresh)[0]
+            order = order[inds + 1]
+
+    if not force_suppress:
+        for cls in range(num_classes):
+            indices_cls = np.where(cids[order] == cls)[0]
+            order_cls = order[indices_cls]
+
+            while order_cls.size > 0:
+                i = order_cls[0]
+                keep.append(i)
+
+                oks_ovr = oks_iou(kpts[i], kpts[order_cls[1:]], areas[i], areas[order_cls[1:]])
+
+                inds = np.where(oks_ovr <= thresh)[0]
+                order_cls = order_cls[inds + 1]
+
+    return keep
+
+
+def kpt_voting_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True, num_classes=1):
     """
     greedily select boxes with high confidence and overlap with current maximum <= thresh
     rule out overlap >= thresh
@@ -584,16 +635,6 @@ def pose_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True, num_
             i = order[0]
             keep.append(i)
 
-            # xx1 = np.maximum(x1[i], x1[order[1:]])
-            # yy1 = np.maximum(y1[i], y1[order[1:]])
-            # xx2 = np.minimum(x2[i], x2[order[1:]])
-            # yy2 = np.minimum(y2[i], y2[order[1:]])
-            #
-            # w = np.maximum(0.0, xx2 - xx1)
-            # h = np.maximum(0.0, yy2 - yy1)
-            # inter = w * h
-            # ovr = inter / (areas[i] + areas[order[1:]] - inter)
-
             oks_ovr = oks_iou(kpts[i], kpts[order[1:]], areas[i], areas[order[1:]])
 
             inds = np.where(oks_ovr <= thresh)[0]
@@ -607,16 +648,6 @@ def pose_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True, num_
             while order_cls.size > 0:
                 i = order_cls[0]
                 keep.append(i)
-
-                # xx1 = np.maximum(x1[i], x1[order_cls[1:]])
-                # yy1 = np.maximum(y1[i], y1[order_cls[1:]])
-                # xx2 = np.minimum(x2[i], x2[order_cls[1:]])
-                # yy2 = np.minimum(y2[i], y2[order_cls[1:]])
-                #
-                # w = np.maximum(0.0, xx2 - xx1)
-                # h = np.maximum(0.0, yy2 - yy1)
-                # inter = w * h
-                # ovr = inter / (areas[i] + areas[order_cls[1:]] - inter)
 
                 oks_ovr = oks_iou(kpts[i], kpts[order_cls[1:]], areas[i], areas[order_cls[1:]])
                 voting_inds = np.where(oks_ovr > thresh)[0]
@@ -1241,10 +1272,17 @@ def RCNNBoundaryOffsetBB8MultiBoxDetectionClsSpecific(rois_concat, score_concat,
         keep_indices = np.array(keep_indices)
         p_out[0:len(keep_indices)] = p_out[keep_indices]
 
-        # apply pose nms
-        # keep_indices, keep_voted_kpts = pose_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
-        #                                          p_bb8_confidence_y[0:nkeep],
-        #                                          nms_threshold, force_suppress, num_classes)
+        # apply kpt nms
+        keep_indices = kpt_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+                                                 p_bb8_confidence_y[0:nkeep],
+                                                 nms_threshold, force_suppress, num_classes)
+        keep_indices = np.array(keep_indices)
+        p_out[0:len(keep_indices)] = p_out[keep_indices]
+
+        # apply kpt voting nms
+        # keep_indices, keep_voted_kpts = kpt_voting_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+        #                                         p_bb8_confidence_y[0:nkeep],
+        #                                         nms_threshold, force_suppress, num_classes)
         # keep_indices = np.array(keep_indices)
         # p_out[0:len(keep_indices)] = p_out[keep_indices]
         # p_out[0:len(keep_indices), 6:22] = keep_voted_kpts
