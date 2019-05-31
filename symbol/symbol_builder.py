@@ -11,6 +11,7 @@ from operator_py.proposal_target_boundary_offset_soft_cls import BB8ProposalTarg
 # from operator_py.proposal_target_boundary_offset_softcls_clsspecific import BB8ProposalTargetOperator
 # from operator_py.weightedCELoss import *
 from operator_py.softCELoss import SoftCELossOperator
+from operator_py.binaryCrossEntropyLoss import BinaryCrossEntropyLossOperator
 
 def import_module(module_name):
     """Helper function to import module"""
@@ -2924,26 +2925,37 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     # bb8 boundary cls + regression head
     flatten = mx.symbol.flatten(data=roi_pool, name="rcnn_bb8boundary_flatten")
     fc6_weight = mx.symbol.Variable(name="rcnn_bb8boundary_fc6_weight", init=mx.init.Xavier())
-    fc6_bias = mx.symbol.Variable(name="rcnn_bb8boundary_fc6_bias", init=mx.init.Constant(0.0))
+    fc6_bias = mx.symbol.Variable(name="rcnn_bb8boundary_fc6_bias", init=mx.init.Constant(0.0),
+                                  attr={'__lr_mult__': '2.0'})
     fc6 = mx.symbol.FullyConnected(data=flatten, weight=fc6_weight, bias=fc6_bias, num_hidden=1024,
                                    name="rcnn_bb8boundary_fc6")
     relu6 = mx.symbol.Activation(data=fc6, act_type="relu", name="rcnn_bb8boundary_relu6")
     fc7_weight = mx.symbol.Variable(name="rcnn_bb8boundary_fc7_weight", init=mx.init.Xavier())
-    fc7_bias = mx.symbol.Variable(name="rcnn_bb8boundary_fc7_bias", init=mx.init.Constant(0.0))
+    fc7_bias = mx.symbol.Variable(name="rcnn_bb8boundary_fc7_bias", init=mx.init.Constant(0.0),
+                                  attr={'__lr_mult__': '2.0'})
     fc7 = mx.symbol.FullyConnected(data=relu6, weight=fc7_weight, bias=fc7_bias, num_hidden=1024,
                                    name="rcnn_bb8boundary_fc7")
     relu7 = mx.symbol.Activation(data=fc7, act_type="relu", name="rcnn_bb8boundary_relu7")
 
     # boundary cls
     cls_pred_weight = mx.symbol.Variable(name="rcnn_bb8boundary_cls_pred_weight", init=mx.init.Normal(sigma=0.01))
-    cls_pred_bias = mx.symbol.Variable(name="rcnn_bb8boundary_cls_pred_bias", init=mx.init.Constant(0.0))
+    cls_pred_bias = mx.symbol.Variable(name="rcnn_bb8boundary_cls_pred_bias", init=mx.init.Constant(0.0),
+                                       attr={'__lr_mult__': '2.0'})
     rcnn_bb8boundary_cls_score = mx.symbol.FullyConnected(data=relu7, weight=cls_pred_weight, bias=cls_pred_bias,
                                                           num_hidden=8 * 4, name="rcnn_bb8boundary_cls_score")
     # boundary offset reg
     reg_pred_weight = mx.symbol.Variable(name="rcnn_bb8boundary_reg_pred_weight", init=mx.init.Normal(sigma=0.001))
-    reg_pred_bias = mx.symbol.Variable(name="rcnn_bb8boundary_reg_pred_bias", init=mx.init.Constant(0.0))
+    reg_pred_bias = mx.symbol.Variable(name="rcnn_bb8boundary_reg_pred_bias", init=mx.init.Constant(0.0),
+                                       attr={'__lr_mult__': '2.0'})
     rcnn_bb8boundary_reg_pred = mx.symbol.FullyConnected(data=relu7, weight=reg_pred_weight, bias=reg_pred_bias,
                                                          num_hidden=8 * 4 * 2, name="rcnn_bb8boundary_reg_pred")
+
+    # boundary confidence reg
+    conf_pred_weight = mx.symbol.Variable(name="rcnn_bb8boundary_conf_pred_weight", init=mx.init.Normal(sigma=0.001))
+    conf_pred_bias = mx.symbol.Variable(name="rcnn_bb8boundary_conf_pred_bias", init=mx.init.Constant(0.0),
+                                        attr={'__lr_mult__': '2.0'})
+    rcnn_bb8boundary_conf_pred = mx.symbol.FullyConnected(data=relu7, weight=conf_pred_weight, bias=conf_pred_bias,
+                                                         num_hidden=8 * 4 * 2, name="rcnn_bb8boundary_conf_pred")
 
     # # cls loss
     # rcnn_bb8boundary_cls_prob = mx.symbol.SoftmaxOutput(data=rcnn_bb8boundary_cls_score.reshape((0,8,-1)),
@@ -2972,6 +2984,26 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     # rcnn_bb8boundary_reg_loss_ = mx.symbol.broadcast_mul(rcnn_bb8boundary_reg_loss_, no_grad_cls_prob)
     rcnn_bb8boundary_reg_loss = mx.symbol.MakeLoss(rcnn_bb8boundary_reg_loss_, grad_scale=alpha_bb8, \
                                                    normalization='valid', name="rcnn_bb8boundary_reg_loss")
+
+    # confidence target and loss
+    gamma = 1.0
+    boundary_conf_target = mx.symbol.abs(rcnn_bb8boundary_reg_pred - boundary_reg_target)
+    boundary_conf_target = 2. / (1. + mx.symbol.exp(gamma * boundary_conf_target))
+    boundary_conf_target = mx.symbol.BlockGrad(boundary_conf_target)
+
+    rcnn_bb8boundary_conf_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_conf_pred,
+                                                 cls_target=boundary_conf_target,
+                                                 cls_weight=boundary_reg_weight,
+                                                 name="rcnn_bb8boundary_conf_loss",
+                                                 op_type="binarycrossentropyloss",
+                                                 normalization='valid', grad_scale=alpha_bb8)
+
+    # rcnn_bb8boundary_conf_loss_ = mx.symbol.smooth_l1(name="rcnn_bb8boundary_conf_loss_",
+    #                                                  data=boundary_reg_weight * (
+    #                                                          rcnn_bb8boundary_conf_pred - boundary_conf_target),
+    #                                                  scalar=1.0)
+    # rcnn_bb8boundary_conf_loss = mx.symbol.MakeLoss(rcnn_bb8boundary_conf_loss_, grad_scale=alpha_bb8,
+    #                                                 normalization='valid', name='rcnn_bb8boundary_conf_loss')
 
     # heatmap L2 loss
     # rcnn_FGA_cls_loss_ = mx.symbol.square(data=(rcnn_FGA_cls_score - FGA_cls_target), name='rcnn_FGA_cls_loss_') / 2.
@@ -3005,6 +3037,8 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
                                                   name="rcnn_boundary_cls_target")
     rcnn_boundary_reg_target = mx.symbol.MakeLoss(data=boundary_reg_target, grad_scale=0,
                                                   name="rcnn_boundary_reg_target")
+    rcnn_boundary_conf_target = mx.symbol.MakeLoss(data=boundary_reg_weight * boundary_conf_target, grad_scale=0,
+                                                   name="rcnn_boundary_conf_target")
     # rcnn_FGA_cls_score = mx.symbol.MakeLoss(data=rcnn_FGA_cls_score, grad_scale=0, name="rcnn_FGA_cls_score_monitor")
     # rcnn_FGA_bb8_pred = mx.symbol.MakeLoss(data=rcnn_FGA_bb8_pred, grad_scale=0, name="rcnn_FGA_bb8_pred_monitor")
 
@@ -3015,7 +3049,7 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     out = mx.symbol.Group([cls_prob, loc_loss, cls_label, rpn_loc_target, det,
                            rois, score, cid,
                            rcnn_boundary_cls_target, rcnn_boundary_reg_target, rcnn_bb8boundary_cls_prob,
-                           rcnn_bb8boundary_reg_loss
+                           rcnn_bb8boundary_reg_loss, rcnn_boundary_conf_target, rcnn_bb8boundary_conf_prob
                            ])
     return out
 
@@ -3142,9 +3176,16 @@ def get_RCNN_boundary_offset_resnet_fpn_test(num_classes, num_layers, num_filter
     reg_pred_bias = mx.symbol.Variable(name="rcnn_bb8boundary_reg_pred_bias", init=mx.init.Constant(0.0))
     rcnn_bb8boundary_reg_pred = mx.symbol.FullyConnected(data=relu7, weight=reg_pred_weight, bias=reg_pred_bias,
                                                          num_hidden=8 * 4 * 2, name="rcnn_bb8boundary_reg_pred")
+    # boundary confidence reg
+    conf_pred_weight = mx.symbol.Variable(name="rcnn_bb8boundary_conf_pred_weight", init=mx.init.Normal(sigma=0.001))
+    conf_pred_bias = mx.symbol.Variable(name="rcnn_bb8boundary_conf_pred_bias", init=mx.init.Constant(0.0))
+    rcnn_bb8boundary_conf_pred = mx.symbol.FullyConnected(data=relu7, weight=conf_pred_weight, bias=conf_pred_bias,
+                                                          num_hidden=8 * 4 * 2, name="rcnn_bb8boundary_conf_pred")
+
     rcnn_bb8boundary_cls_score_reshape = mx.symbol.reshape(rcnn_bb8boundary_cls_score, shape=(0, -1, 4))
 
-    out = mx.symbol.Group([rois, score, cid, rcnn_bb8boundary_cls_score_reshape, rcnn_bb8boundary_reg_pred])
+    out = mx.symbol.Group([rois, score, cid, rcnn_bb8boundary_cls_score_reshape, rcnn_bb8boundary_reg_pred,
+                           rcnn_bb8boundary_conf_pred])
     return out
 
 

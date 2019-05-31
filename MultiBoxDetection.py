@@ -243,11 +243,13 @@ def TransformFGARCNNBB8ClsSoftmaxRegOffset(rois_concat, rcnn_FGA_cls_score_conca
     return out, ex_FGA_ctr_prob_pick
 
 def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, rcnn_boundary_bb8_pred_concat,
+                                   rcnn_boundary_conf_pred_concat,
                         clip=True, variances=(0.1, 0.1)):
     """
     :param rois_concat: batchsize x num_anchors x 4
     :param rcnn_boundary_cls_score_concat: batchsize x num_anchors x num_keypoints x 4
     :param rcnn_boundary_bb8_pred_concat: batchsize x num_anchors x (2x num_keypoints x 4)
+    :param rcnn_boundary_conf_pred_concat: batchsize x num_anchors x (2x num_keypoints x 4)
     :param clip: (boolean, optional, default=True) clip out-of-boundary boxes
     :param variances: (tuple of, optional, default=(0.1,0.1,0.2,0.2)) variances to be decoded from box regression output
     :return: output: batchsize x num_anchors x 16, locations in [x, y, x, y, ...]
@@ -287,6 +289,10 @@ def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, 
     rcnn_boundary_bb8_delta_x = rcnn_boundary_bb8_pred_concat[index_0, index_1, index_2, boundary_id, 0]
     rcnn_boundary_bb8_delta_y = rcnn_boundary_bb8_pred_concat[index_0, index_1, index_2, boundary_id, 1]
 
+    rcnn_boundary_conf_pred_concat = rcnn_boundary_conf_pred_concat.reshape((batchsize, num_anchors, num_keypoints, 4, 2))
+    rcnn_boundary_conf_delta_x = rcnn_boundary_conf_pred_concat[index_0, index_1, index_2, boundary_id, 0]
+    rcnn_boundary_conf_delta_y = rcnn_boundary_conf_pred_concat[index_0, index_1, index_2, boundary_id, 1]
+
     # rcnn_boundary_bb8_delta_x = rcnn_boundary_bb8_pred_concat[:, :, :, :, 0] * rcnn_boundary_cls_prob
     # rcnn_boundary_bb8_delta_y = rcnn_boundary_bb8_pred_concat[:, :, :, :, 1] * rcnn_boundary_cls_prob
     # rcnn_boundary_bb8_delta_x = np.sum(rcnn_boundary_bb8_delta_x, axis=-1)
@@ -301,7 +307,8 @@ def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, 
     if clip:
         out = np.maximum(0, np.minimum(1, out))
 
-    return out, rcnn_boundary_confidence_x, rcnn_boundary_confidence_y
+    #return out, rcnn_boundary_confidence_x, rcnn_boundary_confidence_y
+    return out, rcnn_boundary_conf_delta_x, rcnn_boundary_conf_delta_y
 
 
 def TransformRCNNBB8BoundaryOffsetClsSpecific(rois_concat, cids_concat, rcnn_boundary_cls_score_concat, rcnn_boundary_bb8_pred_concat,
@@ -1071,6 +1078,7 @@ def FGARCNNClsSoftmaxRegOffsetBB8MultiBoxDetection(rois_concat, score_concat, ci
 
 def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat,
                                                    boundary_cls_score_concat, boundary_reg_pred_concat,
+                                           boundary_conf_pred_concat,
                     threshold=0.01, clip=True, background_id=0, nms_threshold=0.45, force_suppress=False,
                     nms_topk=400, name=None, im_info=(512,512,1), variance=(0.1, 0.1)):
     """
@@ -1080,6 +1088,7 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
     :param cid_concat: batchsize x (num_post_nms x num_fpn) x 1
     :param boundary_cls_score_concat: (batchsize x num_post_nms) x num_keypoints x 4
     :param boundary_reg_pred_concat: (batchsize x num_post_nms) x (2*num_keypoints)
+    :param boundary_conf_pred_concat: (batchsize x num_post_nms) x (2*num_keypoints)
     :param threshold: (float, optional, default=0.01) threshold to be a positive prediction
     :param clip: (boolean, optional, default=True) clip out-of-boundary boxes
     :param background_id: (int optional, default='0') background id
@@ -1114,7 +1123,8 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
     out[:, :, 1:2] = score_concat
     out[:, :, 2:6] = rois_concat[:, :, 1:5]
     out[:, :, 6:22], bb8_confidence_x, bb8_confidence_y = TransformRCNNBB8BoundaryOffset(rois_concat[:, :, 1:5], boundary_cls_score_concat,
-                                                                             boundary_reg_pred_concat, clip,
+                                                                             boundary_reg_pred_concat, boundary_conf_pred_concat,
+                                                                                         clip,
                                                                              variances=variance)
     out = mx.nd.array(out)
     bb8_confidence_x = mx.nd.array(bb8_confidence_x)
@@ -1157,25 +1167,34 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
         # p_out[nkeep:, 0] = -1    # not performed in original mxnet MultiBoxDetection, add by zhangxin
 
         # apply nms
-        keep_indices = nms(p_out[0:nkeep], nms_threshold, force_suppress, num_classes)
+        # keep_indices = nms(p_out[0:nkeep], nms_threshold, force_suppress, num_classes)
+        # keep_indices = np.array(keep_indices)
+        # p_out[0:len(keep_indices)] = p_out[keep_indices]
+
+        # apply kpt nms
+        keep_indices = kpt_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+                                                 p_bb8_confidence_y[0:nkeep],
+                                                 nms_threshold, force_suppress, num_classes)
         keep_indices = np.array(keep_indices)
         p_out[0:len(keep_indices)] = p_out[keep_indices]
 
-        # apply pose nms
-        # keep_indices, keep_voted_kpts = pose_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
-        #                                          p_bb8_confidence_y[0:nkeep],
-        #                                          nms_threshold, force_suppress, num_classes)
+        # apply kpt voting nms
+        # keep_indices, keep_voted_kpts = kpt_voting_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+        #                                         p_bb8_confidence_y[0:nkeep],
+        #                                         nms_threshold, force_suppress, num_classes)
         # keep_indices = np.array(keep_indices)
         # p_out[0:len(keep_indices)] = p_out[keep_indices]
         # p_out[0:len(keep_indices), 6:22] = keep_voted_kpts
 
         p_bb8_confidence_x[0:len(keep_indices)] = p_bb8_confidence_x[keep_indices]
+        p_bb8_confidence_y[0:len(keep_indices)] = p_bb8_confidence_y[keep_indices]
         if len(keep_indices) < p_out.shape[0]:
             p_out[len(keep_indices):, 0] = -1
         out[nbatch, :, :] = p_out
         bb8_confidence_x[nbatch, :, :] = p_bb8_confidence_x
+        bb8_confidence_y[nbatch, :, :] = p_bb8_confidence_y
 
-    return out, bb8_confidence_x
+    return out, bb8_confidence_x, bb8_confidence_y
 
 
 def RCNNBoundaryOffsetBB8MultiBoxDetectionClsSpecific(rois_concat, score_concat, cid_concat,
