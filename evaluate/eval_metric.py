@@ -1382,19 +1382,22 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         cid_concat = preds[2].asnumpy()  # batchsize x num_rois x 1
         boundary_cls_score_concat = preds[3].asnumpy()    # (batchsize x num_rois), num_keypoints, 4
         boundary_reg_pred_concat = preds[4].asnumpy()     # (batchsize x num_rois) x (2*num_keypoints)
+        boundary_conf_pred_concat = preds[5].asnumpy()
 
-        bb8dets, bb8_confidence = RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat,
+        bb8dets, bb8_confidence, confidence_y = RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat,
                                                                  boundary_cls_score_concat, boundary_reg_pred_concat,
+                                                                         boundary_conf_pred_concat,
                                        nms_threshold=0.45, force_suppress=False,
                                        nms_topk=400, im_info=(512, 512, 1), variance=(0.1, 0.1))
         bb8dets = bb8dets.asnumpy()
         bb8_confidence = bb8_confidence.asnumpy()
+        confidence_y = confidence_y.asnumpy()
 
         loc_mae_pixel = []
         bb8_mae_pixel = []
 
         # pose metrics, adapt to multi-class case
-        for sampleDet, sampleLabel, sampleBB8Confidence in zip(bb8dets, labels, bb8_confidence):
+        for sampleDet, sampleLabel, sampleBB8Confidence, sampleBB8Confidence_y in zip(bb8dets, labels, bb8_confidence, confidence_y):
             # calculate for each class
             for instanceLabel in sampleLabel:
                 if instanceLabel[0] < 0:
@@ -1412,6 +1415,7 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
                     if indices.size > 0:
                         instanceDet = sampleDet[indices[0]]  # only consider the most confident instance
                         instanceBB8Confidence = sampleBB8Confidence[indices[0]]
+                        instanceBB8Confidence_y = sampleBB8Confidence_y[indices[0]]
 
                         loc_mae_pixel.append(np.abs((instanceDet[2:6] - instanceLabel[1:5]) * 300.))
                         bb8_mae_pixel.append(np.abs((instanceDet[6:22] - instanceLabel[8:24]) * 300.))

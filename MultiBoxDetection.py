@@ -290,6 +290,7 @@ def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, 
     rcnn_boundary_bb8_delta_y = rcnn_boundary_bb8_pred_concat[index_0, index_1, index_2, boundary_id, 1]
 
     rcnn_boundary_conf_pred_concat = rcnn_boundary_conf_pred_concat.reshape((batchsize, num_anchors, num_keypoints, 4, 2))
+    rcnn_boundary_conf_pred_concat = 1. / np.exp(rcnn_boundary_conf_pred_concat)
     rcnn_boundary_conf_delta_x = rcnn_boundary_conf_pred_concat[index_0, index_1, index_2, boundary_id, 0]
     rcnn_boundary_conf_delta_y = rcnn_boundary_conf_pred_concat[index_0, index_1, index_2, boundary_id, 1]
 
@@ -546,11 +547,26 @@ def oks_iou(g, d, a_g, a_d):
 def keypoint_voting(kpt, conf_x, conf_y, voting_kpts, ovrlaps, conf_vks_x, conf_vks_y):
     kpt_x = kpt.reshape((-1, 2))[:, 0]
     kpt_y = kpt.reshape((-1, 2))[:, 1]
+
+    non_repeat_indices = []
+    tmp_ovrlap = 1.0
+    for i, ovrlap in enumerate(ovrlaps):
+        if ovrlap == tmp_ovrlap:
+            continue
+        else:
+            tmp_ovrlap = ovrlap
+            non_repeat_indices.append(i)
+
+    voting_kpts = voting_kpts[non_repeat_indices]
+    ovrlaps = ovrlaps[non_repeat_indices]
+    conf_vks_x = conf_vks_x[non_repeat_indices]
+    conf_vks_y = conf_vks_y[non_repeat_indices]
     voting_kpts_x = voting_kpts.reshape((-1, 8, 2))[:, :, 0]
     voting_kpts_y = voting_kpts.reshape((-1, 8, 2))[:, :, 1]
 
-    p_vks_x = np.exp(-np.square(1 - ovrlaps))[:, np.newaxis] * conf_vks_x
-    p_vks_y = np.exp(-np.square(1 - ovrlaps))[:, np.newaxis] * conf_vks_y
+    sigmat = 0.02
+    p_vks_x = np.exp(-np.square(1 - ovrlaps) / sigmat)[:, np.newaxis] * conf_vks_x
+    p_vks_y = np.exp(-np.square(1 - ovrlaps) / sigmat)[:, np.newaxis] * conf_vks_y
 
     voted_x = conf_x * kpt_x + np.sum(p_vks_x * voting_kpts_x, axis=0)
     voted_x /= (conf_x + np.sum(p_vks_x, axis=0))
@@ -1172,19 +1188,19 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
         # p_out[0:len(keep_indices)] = p_out[keep_indices]
 
         # apply kpt nms
-        keep_indices = kpt_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
-                                                 p_bb8_confidence_y[0:nkeep],
-                                                 nms_threshold, force_suppress, num_classes)
-        keep_indices = np.array(keep_indices)
-        p_out[0:len(keep_indices)] = p_out[keep_indices]
-
-        # apply kpt voting nms
-        # keep_indices, keep_voted_kpts = kpt_voting_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
-        #                                         p_bb8_confidence_y[0:nkeep],
-        #                                         nms_threshold, force_suppress, num_classes)
+        # keep_indices = kpt_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+        #                                          p_bb8_confidence_y[0:nkeep],
+        #                                          nms_threshold, force_suppress, num_classes)
         # keep_indices = np.array(keep_indices)
         # p_out[0:len(keep_indices)] = p_out[keep_indices]
-        # p_out[0:len(keep_indices), 6:22] = keep_voted_kpts
+
+        # apply kpt voting nms
+        keep_indices, keep_voted_kpts = kpt_voting_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+                                                p_bb8_confidence_y[0:nkeep],
+                                                nms_threshold, force_suppress, num_classes)
+        keep_indices = np.array(keep_indices)
+        p_out[0:len(keep_indices)] = p_out[keep_indices]
+        p_out[0:len(keep_indices), 6:22] = keep_voted_kpts
 
         p_bb8_confidence_x[0:len(keep_indices)] = p_bb8_confidence_x[keep_indices]
         p_bb8_confidence_y[0:len(keep_indices)] = p_bb8_confidence_y[keep_indices]
