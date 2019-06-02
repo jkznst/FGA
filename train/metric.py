@@ -342,9 +342,9 @@ class MultiBoxMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
     def __init__(self, eps=1e-8):
         super(MultiBoxMetric_RCNN_boundary_offset, self).__init__('MultiBox_softmax')
         self.eps = eps
-        self.num = 6
+        self.num = 5
         self.name = ['rpn_CrossEntropy', 'rpn_SmoothL1', 'rcnn_boundary_cls_CrossEntropy', 'rcnn_boundary_cls_accuracy',
-                     'rcnn_boundary_bb8_pred_SmoothL1', 'rcnn_boundary_conf_CrossEntropy']
+                     'rcnn_boundary_bb8_pred_KL_SmoothL1']
         self.reset()
 
     def reset(self):
@@ -402,13 +402,13 @@ class MultiBoxMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         rcnn_boundary_reg_target = preds[9].asnumpy()    # shape (N_rois, 2*num_keypoints*4)
         rcnn_boundary_cls_prob = preds[10].asnumpy()     # shape (N_rois, num_keypoints, 4)
         rcnn_boundary_reg_loss = preds[11].asnumpy()
-        rcnn_boundary_conf_target = preds[12].asnumpy()
-        rcnn_boundary_conf_prob = preds[13].asnumpy()
+        # rcnn_boundary_conf_target = preds[12].asnumpy()
+        # rcnn_boundary_conf_prob = preds[13].asnumpy()
 
-        conf_targets_valid = rcnn_boundary_conf_target[rcnn_boundary_conf_target.nonzero()]
-        conf_targets_valid_mean = np.mean(conf_targets_valid)
-        conf_targets_valid_medium = np.median(conf_targets_valid)
-        conf_targets_valid_variance = np.var(rcnn_boundary_conf_target)
+        # conf_targets_valid = rcnn_boundary_conf_target[rcnn_boundary_conf_target.nonzero()]
+        # conf_targets_valid_mean = np.mean(conf_targets_valid)
+        # conf_targets_valid_medium = np.median(conf_targets_valid)
+        # conf_targets_valid_variance = np.var(rcnn_boundary_conf_target)
 
         # rcnn_boundary_reg_target_abs_mean = np.mean(np.abs(rcnn_boundary_reg_target))
         # rcnn_boundary_reg_target_mean = np.mean(rcnn_boundary_reg_target)
@@ -435,13 +435,13 @@ class MultiBoxMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         self.num_inst[4] += rcnn_valid_count * 2
 
         # conf binary cross entropy loss
-        conf_mask = np.where(rcnn_boundary_conf_target > 0)
-        conf_prob = rcnn_boundary_conf_prob[conf_mask]  # dimension 1
-        conf_target = rcnn_boundary_conf_target[conf_mask]
-        conf_valid_count = conf_target.size
-        self.sum_metric[5] += (-conf_target * np.log(conf_prob + self.eps)
-                               - (1 - conf_target) * np.log(1 - conf_prob + self.eps)).sum()
-        self.num_inst[5] += conf_valid_count
+        # conf_mask = np.where(rcnn_boundary_conf_target > 0)
+        # conf_prob = rcnn_boundary_conf_prob[conf_mask]  # dimension 1
+        # conf_target = rcnn_boundary_conf_target[conf_mask]
+        # conf_valid_count = conf_target.size
+        # self.sum_metric[5] += (-conf_target * np.log(conf_prob + self.eps)
+        #                        - (1 - conf_target) * np.log(1 - conf_prob + self.eps)).sum()
+        # self.num_inst[5] += conf_valid_count
 
         # conf smooth l1 loss
         # self.sum_metric[5] += np.sum(rcnn_boundary_conf_loss)
