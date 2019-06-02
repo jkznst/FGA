@@ -11,7 +11,8 @@ from operator_py.proposal_target_boundary_offset_soft_cls import BB8ProposalTarg
 # from operator_py.proposal_target_boundary_offset_softcls_clsspecific import BB8ProposalTargetOperator
 # from operator_py.weightedCELoss import *
 from operator_py.softCELoss import SoftCELossOperator
-from operator_py.binaryCrossEntropyLoss import BinaryCrossEntropyLossOperator
+# from operator_py.binaryCrossEntropyLoss import BinaryCrossEntropyLossOperator
+from operator_py.KLLoss import KLLossOperator
 
 def import_module(module_name):
     """Helper function to import module"""
@@ -2962,13 +2963,14 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     #                                                     label=boundary_cls_target, \
     #     ignore_label=-1, use_ignore=True, grad_scale=alpha_bb8, preserve_shape=True, \
     #     normalization='valid', name="rcnn_bb8boundary_cls_prob")
-    rcnn_bb8boundary_reg_loss_ = mx.symbol.smooth_l1(name="rcnn_bb8boundary_reg_loss_",
-                                                     data=boundary_reg_weight * (
-                                                             rcnn_bb8boundary_reg_pred - boundary_reg_target),
-                                                     scalar=1.0)
-    ohcm_mask = mx.symbol.topk(data=rcnn_bb8boundary_reg_loss_, axis=-1, k=16, ret_typ='mask', is_ascend=False)
-    ohcm_mask = mx.symbol.BlockGrad(ohcm_mask)
-    rcnn_bb8boundary_reg_loss_ = rcnn_bb8boundary_reg_loss_ * ohcm_mask
+
+    # rcnn_bb8boundary_reg_loss_ = mx.symbol.smooth_l1(name="rcnn_bb8boundary_reg_loss_",
+    #                                                  data=boundary_reg_weight * (
+    #                                                          rcnn_bb8boundary_reg_pred - boundary_reg_target),
+    #                                                  scalar=1.0)
+    # ohcm_mask = mx.symbol.topk(data=rcnn_bb8boundary_reg_loss_, axis=-1, k=16, ret_typ='mask', is_ascend=False)
+    # ohcm_mask = mx.symbol.BlockGrad(ohcm_mask)
+    # rcnn_bb8boundary_reg_loss_ = rcnn_bb8boundary_reg_loss_ * ohcm_mask
 
     rcnn_bb8boundary_cls_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_cls_score.reshape((0, -1, 4)),
                                                  cls_target=boundary_cls_target,
@@ -2982,21 +2984,25 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     # no_grad_cls_prob = mx.symbol.BlockGrad(1.1 * no_grad_cls_prob)
     # rcnn_bb8boundary_reg_loss_ = mx.symbol.reshape(rcnn_bb8boundary_reg_loss_, shape=(0, 8, -1))
     # rcnn_bb8boundary_reg_loss_ = mx.symbol.broadcast_mul(rcnn_bb8boundary_reg_loss_, no_grad_cls_prob)
-    rcnn_bb8boundary_reg_loss = mx.symbol.MakeLoss(rcnn_bb8boundary_reg_loss_, grad_scale=alpha_bb8, \
-                                                   normalization='valid', name="rcnn_bb8boundary_reg_loss")
+    # rcnn_bb8boundary_reg_loss = mx.symbol.MakeLoss(rcnn_bb8boundary_reg_loss_, grad_scale=alpha_bb8, \
+    #                                                normalization='valid', name="rcnn_bb8boundary_reg_loss")
+    rcnn_bb8boundary_reg_loss = mx.symbol.Custom(reg_pred=rcnn_bb8boundary_reg_pred, reg_target=boundary_reg_target,
+                                                 reg_weight=boundary_reg_weight, variance=rcnn_bb8boundary_conf_pred,
+                                                 normalization='valid', grad_scale=alpha_bb8,
+                                                 op_type="klloss", name="rcnn_bb8boundary_reg_kl_loss")
 
     # confidence target and loss
-    gamma = 1.0
-    boundary_conf_target = mx.symbol.abs(rcnn_bb8boundary_reg_pred - boundary_reg_target)
-    boundary_conf_target = 2. / (1. + mx.symbol.exp(gamma * boundary_conf_target))
-    boundary_conf_target = mx.symbol.BlockGrad(boundary_conf_target)
-
-    rcnn_bb8boundary_conf_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_conf_pred,
-                                                 cls_target=boundary_conf_target,
-                                                 cls_weight=boundary_reg_weight,
-                                                 name="rcnn_bb8boundary_conf_loss",
-                                                 op_type="binarycrossentropyloss",
-                                                 normalization='valid', grad_scale=alpha_bb8)
+    # gamma = 1.0
+    # boundary_conf_target = mx.symbol.abs(rcnn_bb8boundary_reg_pred - boundary_reg_target)
+    # boundary_conf_target = 2. / (1. + mx.symbol.exp(gamma * boundary_conf_target))
+    # boundary_conf_target = mx.symbol.BlockGrad(boundary_conf_target)
+    #
+    # rcnn_bb8boundary_conf_prob = mx.symbol.Custom(cls_score=rcnn_bb8boundary_conf_pred,
+    #                                              cls_target=boundary_conf_target,
+    #                                              cls_weight=boundary_reg_weight,
+    #                                              name="rcnn_bb8boundary_conf_loss",
+    #                                              op_type="binarycrossentropyloss",
+    #                                              normalization='valid', grad_scale=alpha_bb8)
 
     # rcnn_bb8boundary_conf_loss_ = mx.symbol.smooth_l1(name="rcnn_bb8boundary_conf_loss_",
     #                                                  data=boundary_reg_weight * (
@@ -3037,8 +3043,8 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
                                                   name="rcnn_boundary_cls_target")
     rcnn_boundary_reg_target = mx.symbol.MakeLoss(data=boundary_reg_target, grad_scale=0,
                                                   name="rcnn_boundary_reg_target")
-    rcnn_boundary_conf_target = mx.symbol.MakeLoss(data=boundary_reg_weight * boundary_conf_target, grad_scale=0,
-                                                   name="rcnn_boundary_conf_target")
+    # rcnn_boundary_conf_target = mx.symbol.MakeLoss(data=boundary_reg_weight * boundary_conf_target, grad_scale=0,
+    #                                                name="rcnn_boundary_conf_target")
     # rcnn_FGA_cls_score = mx.symbol.MakeLoss(data=rcnn_FGA_cls_score, grad_scale=0, name="rcnn_FGA_cls_score_monitor")
     # rcnn_FGA_bb8_pred = mx.symbol.MakeLoss(data=rcnn_FGA_bb8_pred, grad_scale=0, name="rcnn_FGA_bb8_pred_monitor")
 
@@ -3049,7 +3055,7 @@ def get_RCNN_boundary_offset_resnet_fpn_train(num_classes, alpha_bb8, num_layers
     out = mx.symbol.Group([cls_prob, loc_loss, cls_label, rpn_loc_target, det,
                            rois, score, cid,
                            rcnn_boundary_cls_target, rcnn_boundary_reg_target, rcnn_bb8boundary_cls_prob,
-                           rcnn_bb8boundary_reg_loss, rcnn_boundary_conf_target, rcnn_bb8boundary_conf_prob
+                           rcnn_bb8boundary_reg_loss
                            ])
     return out
 
