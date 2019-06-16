@@ -1645,6 +1645,14 @@ class PoseMetric_RCNN_boundary_offset(mx.metric.EvalMetric):
         # "t": Rt[0:3, 3:4]}
 
         # opencv epnp method, almost the same results as my_epnp, but faster ( 0.0176s).
+        # bb8_index = np.where((np.exp(bb8confidence) - np.exp(-bb8confidence))
+        #                      /(np.exp(bb8confidence) + np.exp(-bb8confidence)) > 0.7)[0]
+        # if len(bb8_index) < 4:
+        #     bb8_index = np.argsort(bb8confidence)[::-1][0:4]
+        # Xworld = np.expand_dims(BoundingBox[bb8_index], 0)
+        # Ximg_pix = Ximg_pix.reshape((-1, 2))
+        # Ximg_pix = np.expand_dims(Ximg_pix[bb8_index], 0)
+
         Xworld = np.expand_dims(BoundingBox, 0)
         Ximg_pix = Ximg_pix.reshape((-1, 2))
         Ximg_pix = np.expand_dims(Ximg_pix, 0)
