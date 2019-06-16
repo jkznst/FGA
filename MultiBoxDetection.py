@@ -274,6 +274,7 @@ def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, 
     rcnn_boundary_confidence_y = np.where(rcnn_boundary_cls_prob[:, :, :, 0] + rcnn_boundary_cls_prob[:, :, :, 1] > rcnn_boundary_cls_prob[:, :, :, 2] + rcnn_boundary_cls_prob[:, :, :, 3],
                                           rcnn_boundary_cls_prob[:, :, :, 0] + rcnn_boundary_cls_prob[:, :, :, 1],
                                           rcnn_boundary_cls_prob[:, :, :, 2] + rcnn_boundary_cls_prob[:, :, :, 3])
+    rcnn_boundary_subspace_prob = np.amax(rcnn_boundary_cls_prob, axis=-1, keepdims=False)
 
     condition_boundary_l = (boundary_id % 2 == 0)
     condition_boundary_t = (boundary_id < 2)
@@ -309,7 +310,7 @@ def TransformRCNNBB8BoundaryOffset(rois_concat, rcnn_boundary_cls_score_concat, 
         out = np.maximum(0, np.minimum(1, out))
 
     #return out, rcnn_boundary_confidence_x, rcnn_boundary_confidence_y
-    return out, rcnn_boundary_conf_delta_x, rcnn_boundary_conf_delta_y
+    return out, rcnn_boundary_conf_delta_x, rcnn_boundary_conf_delta_y, rcnn_boundary_subspace_prob
 
 
 def TransformRCNNBB8BoundaryOffsetClsSpecific(rois_concat, cids_concat, rcnn_boundary_cls_score_concat, rcnn_boundary_bb8_pred_concat,
@@ -527,6 +528,20 @@ def nms(dets, thresh, force_suppress=True, num_classes=1):
     return keep
 
 
+def cal_pose_score(dets, subspace_probs, confidence_x, confidence_y):
+    """
+    :param dets: mx.nd.array, shape: (num_anchors, 22)
+    :param subspace_probs: mx.nd.array, shape: (num_anchors, num_keypoints)
+    :param confidence_x:
+    :param confidence_y:
+    :return:
+    """
+    det_scores = dets[:, 1]
+    keypoint_scores = subspace_probs * mx.nd.minimum(confidence_x, confidence_y)
+    keypoint_scores = mx.nd.mean(keypoint_scores, axis=-1, keepdims=False)
+    pose_scores = det_scores * keypoint_scores
+    return pose_scores
+
 def oks_iou(g, d, a_g, a_d):
     xg = g[0::2]
     yg = g[1::2]
@@ -538,7 +553,7 @@ def oks_iou(g, d, a_g, a_d):
 
         dx = xd - xg
         dy = yd - yg
-        e = (dx ** 2 + dy ** 2) / ((a_g + a_d[n_d]) / 2 + np.spacing(1)) / 2
+        e = (dx ** 2 + dy ** 2) / ((a_g + a_d[n_d]) / 2 + np.spacing(1)) #/ 2
 
         ious[n_d] = np.sum(np.exp(-e)) / e.shape[0] if e.shape[0] != 0 else 0.0
     return ious
@@ -564,17 +579,22 @@ def keypoint_voting(kpt, conf_x, conf_y, voting_kpts, ovrlaps, conf_vks_x, conf_
     voting_kpts_x = voting_kpts.reshape((-1, 8, 2))[:, :, 0]
     voting_kpts_y = voting_kpts.reshape((-1, 8, 2))[:, :, 1]
 
-    sigmat = 0.02
-    p_vks_x = np.exp(-np.square(1 - ovrlaps) / sigmat)[:, np.newaxis] * conf_vks_x
-    p_vks_y = np.exp(-np.square(1 - ovrlaps) / sigmat)[:, np.newaxis] * conf_vks_y
+    sigmat = 0.001
+    p_vks = np.exp(-np.square(1 - ovrlaps) / sigmat)[:, np.newaxis]
 
-    voted_x = conf_x * kpt_x + np.sum(p_vks_x * voting_kpts_x, axis=0)
-    voted_x /= (conf_x + np.sum(p_vks_x, axis=0))
-    voted_y = conf_y * kpt_y + np.sum(p_vks_y * voting_kpts_y, axis=0)
-    voted_y /= (conf_y + np.sum(p_vks_y, axis=0))
+    voted_x = conf_x * kpt_x + np.sum(p_vks  * conf_vks_x * voting_kpts_x, axis=0)
+    voted_x /= (conf_x + np.sum(p_vks  * conf_vks_x, axis=0))
+    voted_y = conf_y * kpt_y + np.sum(p_vks  * conf_vks_y * voting_kpts_y, axis=0)
+    voted_y /= (conf_y + np.sum(p_vks  * conf_vks_y, axis=0))
+
+    voted_conf_x = conf_x + np.sum(p_vks * conf_vks_x, axis=0)
+    voted_conf_x /= (1.0 + np.sum(p_vks, axis=0))
+    voted_conf_y = conf_x + np.sum(p_vks * conf_vks_y, axis=0)
+    voted_conf_y /= (1.0 + np.sum(p_vks, axis=0))
+    voted_conf = np.minimum(voted_conf_x, voted_conf_y)
 
     voted_kpt = np.stack((voted_x, voted_y), axis=-1).flatten()
-    return voted_kpt
+    return voted_kpt, voted_conf
 
 
 def kpt_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True, num_classes=1):
@@ -652,6 +672,7 @@ def kpt_voting_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True
 
     keep = []
     keep_voted_kpts = []
+    keep_voted_confs = []
 
     if force_suppress:
         while order.size > 0:
@@ -674,16 +695,17 @@ def kpt_voting_nms(dets, confidence_x, confidence_y, thresh, force_suppress=True
 
                 oks_ovr = oks_iou(kpts[i], kpts[order_cls[1:]], areas[i], areas[order_cls[1:]])
                 voting_inds = np.where(oks_ovr > thresh)[0]
-                voted_kpts = keypoint_voting(kpts[i], bb8_confidences_x[i], bb8_confidences_y[i],
+                voted_kpts, voted_confs = keypoint_voting(kpts[i], bb8_confidences_x[i], bb8_confidences_y[i],
                                              kpts[order_cls[voting_inds + 1]], oks_ovr[voting_inds],
                                              bb8_confidences_x[order_cls[voting_inds + 1]],
                                              bb8_confidences_y[order_cls[voting_inds + 1]])
                 keep_voted_kpts.append(voted_kpts)
+                keep_voted_confs.append(voted_confs)
 
                 inds = np.where(oks_ovr <= thresh)[0]
                 order_cls = order_cls[inds + 1]
 
-    return keep, keep_voted_kpts
+    return keep, keep_voted_kpts, keep_voted_confs
 
 
 def myMultiBoxDetection(cls_prob, loc_pred, anchors, \
@@ -1138,13 +1160,14 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
     out[:, :, 0:1] = cid_concat
     out[:, :, 1:2] = score_concat
     out[:, :, 2:6] = rois_concat[:, :, 1:5]
-    out[:, :, 6:22], bb8_confidence_x, bb8_confidence_y = TransformRCNNBB8BoundaryOffset(rois_concat[:, :, 1:5], boundary_cls_score_concat,
-                                                                             boundary_reg_pred_concat, boundary_conf_pred_concat,
-                                                                                         clip,
-                                                                             variances=variance)
+    out[:, :, 6:22], bb8_confidence_x, bb8_confidence_y, bb8_subspace_prob = \
+        TransformRCNNBB8BoundaryOffset(rois_concat[:, :, 1:5], boundary_cls_score_concat,
+                                        boundary_reg_pred_concat, boundary_conf_pred_concat,
+                                        clip, variances=variance)
     out = mx.nd.array(out)
     bb8_confidence_x = mx.nd.array(bb8_confidence_x)
     bb8_confidence_y = mx.nd.array(bb8_confidence_y)
+    bb8_subspace_prob = mx.nd.array(bb8_subspace_prob)
 
     # if the score < positive threshold, reset the id and score to -1
     out[:, :, 0] = mx.nd.where(condition=out[:, :, 1]<threshold,
@@ -1163,6 +1186,7 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
         p_out = out[nbatch, :, :]
         p_bb8_confidence_x = bb8_confidence_x[nbatch, :, :]
         p_bb8_confidence_y = bb8_confidence_y[nbatch, :, :]
+        p_bb8_subspace_prob = bb8_subspace_prob[nbatch, :, :]
         p_out_ = p_out.asnumpy()
         p_bb8_confidence_x_ = p_bb8_confidence_x.asnumpy()
         p_bb8_confidence_y_ = p_bb8_confidence_y.asnumpy()
@@ -1173,10 +1197,12 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
         # sort and apply NMS
         nkeep = nms_topk if nms_topk<valid_count[nbatch] else int(valid_count[nbatch])
         # sort confidence in descend order and re-order output
-        confidence_order_index = p_out[:, 1].topk(k=nkeep)
-        p_out[0:nkeep] = p_out[confidence_order_index]
-        p_bb8_confidence_x[0:nkeep] = p_bb8_confidence_x[confidence_order_index]
-        p_bb8_confidence_y[0:nkeep] = p_bb8_confidence_y[confidence_order_index]
+        pose_scores = cal_pose_score(p_out, p_bb8_subspace_prob, p_bb8_confidence_x, p_bb8_confidence_y)
+        # score_order_index = p_out[:, 1].topk(k=nkeep)
+        score_order_index = pose_scores.topk(k=nkeep)
+        p_out[0:nkeep] = p_out[score_order_index]
+        p_bb8_confidence_x[0:nkeep] = p_bb8_confidence_x[score_order_index]
+        p_bb8_confidence_y[0:nkeep] = p_bb8_confidence_y[score_order_index]
         p_out_ = p_out.asnumpy()
         p_bb8_confidence_x_ = p_bb8_confidence_x.asnumpy()
         p_bb8_confidence_y_ = p_bb8_confidence_y.asnumpy()
@@ -1186,6 +1212,8 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
         # keep_indices = nms(p_out[0:nkeep], nms_threshold, force_suppress, num_classes)
         # keep_indices = np.array(keep_indices)
         # p_out[0:len(keep_indices)] = p_out[keep_indices]
+        # p_bb8_confidence_x[0:len(keep_indices)] = p_bb8_confidence_x[keep_indices]
+        # p_bb8_confidence_y[0:len(keep_indices)] = p_bb8_confidence_y[keep_indices]
 
         # apply kpt nms
         # keep_indices = kpt_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
@@ -1193,17 +1221,20 @@ def RCNNBoundaryOffsetBB8MultiBoxDetection(rois_concat, score_concat, cid_concat
         #                                          nms_threshold, force_suppress, num_classes)
         # keep_indices = np.array(keep_indices)
         # p_out[0:len(keep_indices)] = p_out[keep_indices]
+        # p_bb8_confidence_x[0:len(keep_indices)] = p_bb8_confidence_x[keep_indices]
+        # p_bb8_confidence_y[0:len(keep_indices)] = p_bb8_confidence_y[keep_indices]
 
         # apply kpt voting nms
-        keep_indices, keep_voted_kpts = kpt_voting_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
+        keep_indices, keep_voted_kpts, keep_voted_confs = \
+            kpt_voting_nms(p_out[0:nkeep], p_bb8_confidence_x[0:nkeep],
                                                 p_bb8_confidence_y[0:nkeep],
                                                 nms_threshold, force_suppress, num_classes)
         keep_indices = np.array(keep_indices)
         p_out[0:len(keep_indices)] = p_out[keep_indices]
         p_out[0:len(keep_indices), 6:22] = keep_voted_kpts
+        p_bb8_confidence_x[0:len(keep_indices)] = keep_voted_confs
+        p_bb8_confidence_y[0:len(keep_indices)] = keep_voted_confs
 
-        p_bb8_confidence_x[0:len(keep_indices)] = p_bb8_confidence_x[keep_indices]
-        p_bb8_confidence_y[0:len(keep_indices)] = p_bb8_confidence_y[keep_indices]
         if len(keep_indices) < p_out.shape[0]:
             p_out[len(keep_indices):, 0] = -1
         out[nbatch, :, :] = p_out
