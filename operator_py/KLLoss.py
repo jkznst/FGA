@@ -27,6 +27,9 @@ class KLLossOperator(mx.operator.CustomOp):
         kl_loss = mx.nd.where(condition, greater_loss, lower_loss)
         kl_loss = kl_loss * reg_weight
 
+        #kl_loss_for_mask = mx.nd.where(reg_weight, kl_loss, -10000. * mx.nd.ones_like(kl_loss))
+        self._ohcm_mask = mx.nd.topk(data=abs_error * reg_weight, axis=-1, k=4, ret_typ='mask', is_ascend=False)
+
         self.assign(out_data[0], req[0], kl_loss)
 
     def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
@@ -34,6 +37,8 @@ class KLLossOperator(mx.operator.CustomOp):
         reg_target = in_data[1]
         reg_weight = in_data[2]
         variance = in_data[3]
+
+        reg_weight = reg_weight * self._ohcm_mask
 
         condition = mx.nd.abs(reg_pred - reg_target) > 1.
         greater_d_reg_pred = mx.nd.exp(-variance) * mx.nd.sign(reg_pred - reg_target)
